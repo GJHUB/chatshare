@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatShare</title>
+<link rel="stylesheet" href="/static/css/style.css?v=1.4.5">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+</head>
+<body>
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <button class="new-chat-btn" id="btn-new-chat" onclick="newConversation()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新聊天
+      </button>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" id="search-input" placeholder="搜索聊天">
+    </div>
+    <div class="sidebar-label">你的聊天</div>
+    <div class="conv-list" id="conv-list"></div>
+    <div class="sidebar-bottom">
+      <div class="user-info">
+        <div class="user-avatar" id="user-avatar">U</div>
+        <div class="user-details">
+          <div class="user-name" id="user-name">用户</div>
+          <div class="user-plan">Pro</div>
+        </div>
+        <button class="logout-btn" onclick="logout()">退出</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main" id="main">
+    <button class="hamburger" onclick="toggleSidebar()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+
+    <!-- Model selector -->
+    <div class="model-bar">
+      <div style="position:relative;display:inline-block">
+        <button class="model-selector-btn" id="model-selector-btn" onclick="toggleModelDropdown(event)">
+          <span id="model-name-display">GPT-4o</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="model-dropdown" id="model-dropdown" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <h2>有什么可以帮你的？</h2>
+        <p>选择模型，开始对话</p>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="input-area">
+      <div id="file-preview-area" class="file-preview-area hidden"></div>
+      <div class="input-wrap">
+        <div class="attach-wrap">
+          <button class="attach-btn" onclick="toggleUploadMenu()" title="上传文件">+</button>
+          <div class="upload-menu hidden" id="upload-menu">
+            <div class="upload-menu-item" onclick="openFileSelector()">📎 上传文件</div>
+          </div>
+        </div>
+        <textarea id="msg-input" placeholder="询问任何问题" rows="1"></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">
+          <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+N 新对话</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="/static/js/app.js?v=1.4.10"></script>
+</body>
+</html>

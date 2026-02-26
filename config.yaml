@@ -1,0 +1,17 @@
+# API Keys
+api_keys:
+  - key: "sk-huoguo-chatshare2026"
+    name: "火锅"
+    rate_limit: 60
+  - key: "sk-user2-chatshare2026"
+    name: "用户2"
+    rate_limit: 30
+
+# 车辆调度
+dispatcher:
+  max_sessions_per_channel: 5
+  session_timeout: 300
+  prefer_low_count: true
+
+# 全局限流
+global_rate_limit: 200

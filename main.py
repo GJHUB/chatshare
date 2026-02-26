@@ -1,0 +1,17 @@
+import logging
+import uvicorn
+
+from src.config import PROXY_HOST, PROXY_PORT
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "src.server:app",
+        host=PROXY_HOST,
+        port=PROXY_PORT,
+        log_level="info",
+    )
