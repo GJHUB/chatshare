@@ -1123,6 +1123,13 @@ async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Re
             conv_id, msg_seq,
         )
         if not ai_msg:
+            # Frontend placeholder may carry seq=0 (or stale seq after long sessions).
+            # Fallback to latest active assistant message in this conversation.
+            ai_msg = await conn.fetchrow(
+                "SELECT id,seq,role FROM chat_messages WHERE conversation_id=$1 AND role='assistant' AND (replaced IS NULL OR replaced=false) ORDER BY seq DESC LIMIT 1",
+                conv_id,
+            )
+        if not ai_msg:
             raise HTTPException(status_code=404, detail="AI message not found")
 
         # Mark this AI message as replaced
