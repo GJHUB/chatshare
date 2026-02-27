@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">咕嘟</string>
+    <string name="app_subtitle">AI 智能对话平台</string>
+    <string name="loading">加载中...</string>
+</resources>
