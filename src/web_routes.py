@@ -438,8 +438,20 @@ async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, pa
 
 async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, username, chatshare_conv_id=None, last_message_id=None, attachments=None):
     """Core streaming logic shared by send/edit/retry. Yields SSE chunks."""
+    # Convert transformed display file_id back to upstream original file_id for official API calls
+    upstream_attachments = None
+    if attachments:
+        upstream_attachments = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                continue
+            copied = dict(item)
+            fid = copied.get("id")
+            if fid:
+                copied["id"] = _to_upstream_file_id(request, fid)
+            upstream_attachments.append(copied)
     channel, chatshare_model = resolve_model(model)
-    if attachments and any(str(a.get("mime_type", "")).startswith("image/") for a in attachments if isinstance(a, dict)):
+    if upstream_attachments and any(str(a.get("mime_type", "")).startswith("image/") for a in upstream_attachments if isinstance(a, dict)):
         chatshare_model = "gpt-5-2-instant"
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
@@ -452,9 +464,9 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
             claude_session.is_busy = True
         elif channel == "sass":
             # Attachment flow should reuse the same session as upload steps when possible
-            if attachments:
+            if upstream_attachments:
                 try:
-                    file_id = (attachments[0] or {}).get("id") if attachments else None
+                    file_id = (upstream_attachments[0] or {}).get("id") if upstream_attachments else None
                     bound = _file_session_map(request).get(file_id) if file_id else None
                     if bound and bound.get("session"):
                         session = bound["session"]
@@ -469,13 +481,13 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
             # HAR successful flow uses /backend-api/f/conversation for attachment chat
             url = session.get_conversation_url()
             headers = session.get_conversation_headers(sentinel_token)
-            backend_request = openai_to_backend_sass(messages, chatshare_model, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=attachments)
+            backend_request = openai_to_backend_sass(messages, chatshare_model, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=upstream_attachments)
         elif channel == "gpt":
             session = await dispatcher.select_car(channel)
             session.is_busy = True
             url = session.get_conversation_url()
             headers = session.get_headers()
-            backend_request = openai_to_backend_gpt(messages, chatshare_model, stream=True, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=attachments)
+            backend_request = openai_to_backend_gpt(messages, chatshare_model, stream=True, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=upstream_attachments)
         else:
             yield f"data: {json.dumps({'error': f'模型 {model} 暂不可用'})}\n\n"
             return
@@ -487,7 +499,7 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
         yield f"data: {json.dumps({'error': f'无法获取模型会话: {str(e)}'})}\n\n"
         return
 
-    if attachments:
+    if upstream_attachments:
         try:
             msg0 = (backend_request.get("messages") or [{}])[0]
             atts = ((msg0.get("metadata") or {}).get("attachments") or [])
