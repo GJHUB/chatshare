@@ -220,16 +220,64 @@ def openai_to_backend_sass(messages: list[dict], model: str, conversation_id: st
     if system_parts and not conversation_id:
         final_content = "\n\n".join(system_parts) + "\n\n" + last_user_content
 
-    backend_messages = [{
+    message = {
         "id": str(uuid.uuid4()),
         "author": {"role": "user"},
         "content": {
             "content_type": "text",
             "parts": [final_content],
         },
-    }]
+    }
+
     if attachments:
-        backend_messages[0]["metadata"] = {"attachments": attachments}
+        normalized_attachments = []
+        image_parts = []
+        has_image = False
+        for item in attachments:
+            file_id = item.get("id")
+            if not file_id:
+                continue
+            mime_type = item.get("mime_type", "application/octet-stream")
+            name = item.get("name", "file")
+            size_bytes = int(item.get("size_bytes", item.get("size", 0)) or 0)
+            width = int(item.get("width", 0) or 0)
+            height = int(item.get("height", 0) or 0)
+
+            normalized = {
+                "id": file_id,
+                "size": size_bytes,
+                "name": name,
+                "mime_type": mime_type,
+                "source": "local",
+            }
+            if width > 0:
+                normalized["width"] = width
+            if height > 0:
+                normalized["height"] = height
+            normalized_attachments.append(normalized)
+
+            if mime_type.startswith("image/"):
+                has_image = True
+                pointer = {
+                    "content_type": "image_asset_pointer",
+                    "asset_pointer": f"file-service://{file_id}",
+                    "size_bytes": size_bytes,
+                }
+                if width > 0:
+                    pointer["width"] = width
+                if height > 0:
+                    pointer["height"] = height
+                image_parts.append(pointer)
+
+        if normalized_attachments:
+            message["metadata"] = {"attachments": normalized_attachments}
+            if has_image:
+                message["content"] = {
+                    "content_type": "multimodal_text",
+                    "parts": image_parts + [final_content or ""],
+                }
+
+    backend_messages = [message]
 
     effective_parent_id = parent_message_id or ("client-created-root" if not conversation_id else str(uuid.uuid4()))
     result = {

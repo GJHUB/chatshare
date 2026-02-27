@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _file_session_map(request: Request) -> dict:
+    m = getattr(request.app.state, "file_upload_session_map", None)
+    if m is None:
+        m = {}
+        request.app.state.file_upload_session_map = m
+    return m
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @router.post("/api/auth/register")
@@ -382,9 +390,6 @@ async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, pa
 async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, username, chatshare_conv_id=None, last_message_id=None, attachments=None):
     """Core streaming logic shared by send/edit/retry. Yields SSE chunks."""
     channel, chatshare_model = resolve_model(model)
-    # File-attachment flow is validated with gpt-5.2-instant on ChatShare side
-    if attachments and chatshare_model == "gpt-5-2-thinking":
-        chatshare_model = "gpt-5.2-instant"
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     # Acquire session
@@ -395,14 +400,23 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
             claude_session = await dispatcher.get_claude_session()
             claude_session.is_busy = True
         elif channel == "sass":
-            session = await dispatcher.get_sass_session()
+            # Attachment flow should reuse the same session as upload steps when possible
+            if attachments:
+                try:
+                    file_id = (attachments[0] or {}).get("id") if attachments else None
+                    bound = _file_session_map(request).get(file_id) if file_id else None
+                    if bound and bound.get("session"):
+                        session = bound["session"]
+                    else:
+                        session = await dispatcher.get_sass_session()
+                except Exception:
+                    session = await dispatcher.get_sass_session()
+            else:
+                session = await dispatcher.get_sass_session()
             session.is_busy = True
             sentinel_token = await session.get_sentinel_token()
-            # File attachment flow uses /backend-api/conversation (not /backend-api/f/conversation)
-            if attachments:
-                url = f"{session.sass_url}/backend-api/conversation"
-            else:
-                url = session.get_conversation_url()
+            # HAR successful flow uses /backend-api/f/conversation for attachment chat
+            url = session.get_conversation_url()
             headers = session.get_conversation_headers(sentinel_token)
             backend_request = openai_to_backend_sass(messages, chatshare_model, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=attachments)
         elif channel == "gpt":
@@ -427,12 +441,13 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
             msg0 = (backend_request.get("messages") or [{}])[0]
             atts = ((msg0.get("metadata") or {}).get("attachments") or [])
             logger.info(
-                "Attachment conversation request: model=%s channel=%s conv_id=%s parent=%s attachments=%s",
+                "Attachment conversation request: model=%s channel=%s conv_id=%s parent=%s attachments=%s payload=%s",
                 chatshare_model,
                 channel,
                 backend_request.get("conversation_id"),
                 backend_request.get("parent_message_id"),
                 json.dumps(atts, ensure_ascii=False),
+                json.dumps(backend_request, ensure_ascii=False)[:1200],
             )
         except Exception:
             pass
@@ -945,6 +960,14 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
 
         logger.info(f"File upload proxy: status={resp.status_code}, file_id={file_id or 'N/A'}, response={json.dumps(result, ensure_ascii=False)[:200]}")
 
+        # Bind file_id to the same sass session context for step2/3/conversation
+        if file_id and session:
+            fmap = _file_session_map(request)
+            fmap[file_id] = {
+                "session": session,
+                "ts": datetime.utcnow().timestamp(),
+            }
+
         # Record file info to database
         if file_id:
             try:
@@ -968,6 +991,49 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
     except Exception as e:
         logger.error(f"File upload proxy error: {e}")
         raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+    finally:
+        if session:
+            session.is_busy = False
+
+
+@router.post("/backend-api/files/process_upload_stream")
+async def proxy_process_upload_stream(request: Request, current_user: dict = Depends(get_current_user)):
+    """透传上传确认阶段（Step 3），优先复用与 file_id 绑定的会话。"""
+    dispatcher = request.app.state.dispatcher
+    session = None
+    try:
+        body = await request.body()
+        payload = {}
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            payload = {}
+        file_id = payload.get("file_id")
+
+        fmap = _file_session_map(request)
+        bound = fmap.get(file_id) if file_id else None
+        if bound and bound.get("session"):
+            session = bound["session"]
+        else:
+            session = await dispatcher.get_sass_session()
+        session.is_busy = True
+
+        sentinel_token = await session.get_sentinel_token()
+        headers = session.get_conversation_headers(sentinel_token)
+        headers["Content-Type"] = "application/json"
+
+        resp = await session._client.post(
+            f"{session.sass_url}/backend-api/files/process_upload_stream",
+            headers=headers,
+            content=body,
+            timeout=120,
+        )
+
+        resp_ct = resp.headers.get("content-type", "application/json")
+        return Response(content=resp.content, status_code=resp.status_code, media_type=resp_ct.split(";")[0])
+    except Exception as e:
+        logger.error(f"process_upload_stream proxy error: {e}")
+        raise HTTPException(status_code=500, detail=f"process_upload_stream 透传失败: {str(e)}")
     finally:
         if session:
             session.is_busy = False
@@ -1036,7 +1102,12 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
     dispatcher = request.app.state.dispatcher
     session = None
     try:
-        session = await dispatcher.get_sass_session()
+        fmap = _file_session_map(request)
+        bound = fmap.get(path)
+        if bound and bound.get("session"):
+            session = bound["session"]
+        else:
+            session = await dispatcher.get_sass_session()
         session.is_busy = True
         sentinel_token = await session.get_sentinel_token()
 

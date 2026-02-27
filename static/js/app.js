@@ -326,6 +326,28 @@ function pickField(obj, keys) {
   return null;
 }
 
+async function getImageDimensions(file) {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const width = img.naturalWidth || 0;
+        const height = img.naturalHeight || 0;
+        URL.revokeObjectURL(url);
+        resolve({ width, height });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({ width: 0, height: 0 });
+      };
+      img.src = url;
+    } catch (_) {
+      resolve({ width: 0, height: 0 });
+    }
+  });
+}
+
 async function uploadPendingFiles() {
   const attachments = [];
   for (let i = 0; i < pendingFiles.length; i++) {
@@ -399,11 +421,16 @@ async function uploadPendingFiles() {
       }
 
       showUploadProgress(i, 100);
+      const mime = pickField(result, ['mime_type', 'mimeType']) || file.type || 'application/octet-stream';
+      const dims = mime.startsWith('image/') ? await getImageDimensions(file) : { width: 0, height: 0 };
       attachments.push({
         id: fileId,
-        mime_type: file.type || pickField(result, ['mime_type', 'mimeType']) || 'application/octet-stream',
-        name: file.name,
-        size_bytes: file.size,
+        mime_type: mime,
+        name: pickField(result, ['name', 'filename']) || file.name,
+        size_bytes: Number(pickField(result, ['size_bytes', 'sizeBytes'])) || file.size,
+        width: dims.width,
+        height: dims.height,
+        preview_url: mime.startsWith('image/') ? URL.createObjectURL(file) : null,
       });
     } catch (e) {
       alert(`文件 ${file.name} 上传出错: ${e.message}`);
@@ -461,13 +488,21 @@ async function sendMessage() {
   if (welcomeEl) welcomeEl.style.display = 'none';
 
   const displayContent = content || '📎 [文件已上传]';
-  appendMessage('user', displayContent, false, null, null);
+  appendMessage('user', displayContent, false, null, null, attachments);
   const aiWrap = appendMessage('assistant', '', true, null, null);
   scrollToBottom();
 
   const body = { content: content || '请分析上传的文件', model: currentModel };
   if (attachments.length > 0) {
-    body.attachments = attachments;
+    // only keep ChatShare-accepted fields
+    body.attachments = attachments.map(a => ({
+      id: a.id,
+      mime_type: a.mime_type,
+      name: a.name,
+      size_bytes: Number(a.size_bytes) || 0,
+      width: Number(a.width) || 0,
+      height: Number(a.height) || 0,
+    }));
     body.force_new_chatshare_context = true;
   }
 
@@ -706,14 +741,32 @@ function retryWithModel(seq) {
 }
 
 // ── Message rendering ──────────────────────────────────────────────────────
-function appendMessage(role, content, streaming, seq, model) {
+function renderAttachmentPreviewHtml(attachments) {
+  if (!attachments || attachments.length === 0) return '';
+  let html = '<div class="msg-attachments">';
+  for (const a of attachments) {
+    const name = escapeHtml(a.name || 'file');
+    const size = formatFileSize(Number(a.size_bytes) || 0);
+    const mime = String(a.mime_type || '');
+    if (mime.startsWith('image/') && a.preview_url) {
+      html += `<div class="msg-attachment-item image"><img src="${a.preview_url}" class="msg-attachment-thumb" alt="${name}"><div class="msg-attachment-meta">🖼️ ${name} (${size})</div></div>`;
+    } else {
+      html += `<div class="msg-attachment-item">📄 ${name} (${size})</div>`;
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function appendMessage(role, content, streaming, seq, model, attachments = null) {
   const el = document.getElementById('messages');
   const wrap = document.createElement('div');
   wrap.className = `msg-wrap msg-${role}`;
   if (seq) wrap.dataset.seq = seq;
 
   if (role === 'user') {
-    wrap.innerHTML = `<div class="msg-content user-msg">${escapeHtml(content)}</div>
+    const attachHtml = renderAttachmentPreviewHtml(attachments);
+    wrap.innerHTML = `${attachHtml}<div class="msg-content user-msg">${escapeHtml(content)}</div>
       <div class="msg-edit-actions"${seq ? '' : ' style="display:none"'}>
         <button class="edit-msg-btn" onclick="startEditMessage(${seq}, this.closest('.msg-wrap'))" title="编辑">✏️</button>
       </div>`;
