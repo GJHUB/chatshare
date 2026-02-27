@@ -964,7 +964,15 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         }
 
         upload_api_url = f"{session.sass_url}/backend-api/files"
-        _log_upstream_request(upload_api_url, {"file_name": file_name, "mime_type": file_content_type, "size": len(file_content), "use_case": use_case})
+        _log_upstream_request(upload_api_url, {
+            "file_name": file_name,
+            "mime_type": file_content_type,
+            "size": len(file_content),
+            "use_case": use_case,
+            "useCase": use_case,
+            "reset_rate_limits": False,
+            "timezone_offset_min": -480,
+        })
         resp = await session._client.post(
             upload_api_url,
             files=files,
