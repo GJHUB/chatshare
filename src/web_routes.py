@@ -1112,10 +1112,6 @@ async def proxy_process_upload_stream(request: Request, current_user: dict = Dep
         except Exception:
             payload = {}
         file_id = payload.get("file_id")
-        upstream_file_id = _to_upstream_file_id(request, file_id) if file_id else file_id
-        if upstream_file_id and upstream_file_id != file_id:
-            payload["file_id"] = upstream_file_id
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
         fmap = _file_session_map(request)
         bound = fmap.get(file_id) if file_id else None
