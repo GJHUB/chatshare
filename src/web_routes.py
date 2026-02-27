@@ -958,7 +958,6 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         files = {"file": (file_name, file_content, file_content_type)}
         data = {
             "use_case": use_case,
-            "useCase": use_case,
             "reset_rate_limits": "false",
             "timezone_offset_min": "-480",
         }
@@ -969,7 +968,6 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
             "mime_type": file_content_type,
             "size": len(file_content),
             "use_case": use_case,
-            "useCase": use_case,
             "reset_rate_limits": False,
             "timezone_offset_min": -480,
         })
@@ -997,7 +995,6 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
                     files={"file": (file_name, file_content, file_content_type)},
                     data={
                         "use_case": use_case,
-                        "useCase": use_case,
                         "reset_rate_limits": "false",
                         "timezone_offset_min": "-480",
                     },
