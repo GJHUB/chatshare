@@ -60,6 +60,19 @@ def _file_session_map(request: Request) -> dict:
     return m
 
 
+def _file_id_alias_map(request: Request) -> dict:
+    m = getattr(request.app.state, "file_id_alias_map", None)
+    if m is None:
+        m = {}
+        request.app.state.file_id_alias_map = m
+    return m
+
+
+def _to_upstream_file_id(request: Request, file_id: str) -> str:
+    amap = _file_id_alias_map(request)
+    return amap.get(file_id, file_id)
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @router.post("/api/auth/register")
@@ -1008,8 +1021,17 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         result = resp.json()
         _log_upstream_response(upload_api_url, resp.status_code, json.dumps(result, ensure_ascii=False))
 
-        # Keep original upload_url from ChatShare, and provide a proxy-safe path field
+        # Keep original upload_url and build transformed file_id experiment id
         file_id = result.get("file_id") or result.get("id")
+        transformed_file_id = file_id
+        if isinstance(file_id, str) and file_id.startswith("saasnexus--"):
+            transformed_file_id = f"saasnexus-multimodal-{uuid.uuid4().hex[:8]}-{len(file_content)}"
+            _file_id_alias_map(request)[transformed_file_id] = file_id
+            result["file_id_origin"] = file_id
+            result["file_id"] = transformed_file_id
+            if "id" in result:
+                result["id"] = transformed_file_id
+
         upload_url = result.get("upload_url")
         if isinstance(upload_url, str) and upload_url:
             try:
@@ -1017,16 +1039,18 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
                 p = urlparse(upload_url)
                 if p.path.startswith("/file_upload/"):
                     result["upload_url_origin"] = upload_url
-                    result["upload_proxy_url"] = p.path + (("?" + p.query) if p.query else "")
+                    proxy_path = p.path.replace(file_id, transformed_file_id) if file_id and transformed_file_id else p.path
+                    result["upload_proxy_url"] = proxy_path + (("?" + p.query) if p.query else "")
+                    result["upload_url"] = result["upload_proxy_url"]
             except Exception:
                 pass
 
-        logger.info(f"File upload proxy: status={resp.status_code}, file_id={file_id or 'N/A'}, response={json.dumps(result, ensure_ascii=False)[:200]}")
+        logger.info(f"File upload proxy: status={resp.status_code}, file_id={transformed_file_id or 'N/A'}, response={json.dumps(result, ensure_ascii=False)[:200]}")
 
         # Bind file_id to the same sass session context for step2/3/conversation
-        if file_id and session:
+        if transformed_file_id and session:
             fmap = _file_session_map(request)
-            fmap[file_id] = {
+            fmap[transformed_file_id] = {
                 "session": session,
                 "ts": datetime.utcnow().timestamp(),
             }
@@ -1072,6 +1096,10 @@ async def proxy_process_upload_stream(request: Request, current_user: dict = Dep
         except Exception:
             payload = {}
         file_id = payload.get("file_id")
+        upstream_file_id = _to_upstream_file_id(request, file_id) if file_id else file_id
+        if upstream_file_id and upstream_file_id != file_id:
+            payload["file_id"] = upstream_file_id
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
         fmap = _file_session_map(request)
         bound = fmap.get(file_id) if file_id else None
@@ -1170,8 +1198,11 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
     dispatcher = request.app.state.dispatcher
     session = None
     try:
+        incoming_file_id = path
+        upstream_file_id = _to_upstream_file_id(request, incoming_file_id)
+
         fmap = _file_session_map(request)
-        bound = fmap.get(path)
+        bound = fmap.get(incoming_file_id)
         if bound and bound.get("session"):
             session = bound["session"]
         else:
@@ -1179,7 +1210,7 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
         session.is_busy = True
         sentinel_token = await session.get_sentinel_token()
 
-        upstream_url = f"{session.sass_url}/file_upload/{path}"
+        upstream_url = f"{session.sass_url}/file_upload/{upstream_file_id}"
         if request.url.query:
             upstream_url = f"{upstream_url}?{request.url.query}"
 
