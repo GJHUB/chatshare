@@ -390,6 +390,8 @@ async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, pa
 async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, username, chatshare_conv_id=None, last_message_id=None, attachments=None):
     """Core streaming logic shared by send/edit/retry. Yields SSE chunks."""
     channel, chatshare_model = resolve_model(model)
+    if attachments and any(str(a.get("mime_type", "")).startswith("image/") for a in attachments if isinstance(a, dict)):
+        chatshare_model = "gpt-5-2-instant"
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     # Acquire session
