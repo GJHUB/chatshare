@@ -931,10 +931,17 @@ function updateSendBtn() {
     : '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
 }
 
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('overlay').classList.toggle('show');
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('overlay').classList.add('show');
 }
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar.classList.contains('open')) closeSidebar();
+  else openSidebar();
+}
+
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('overlay').classList.remove('show');
@@ -969,6 +976,34 @@ document.addEventListener('keydown', e => {
 });
 document.getElementById('search-input').addEventListener('input', renderConversations);
 
+function initMobileSidebarGesture() {
+  let startX = 0;
+  let startY = 0;
+  const threshold = 48;
+
+  document.addEventListener('touchstart', e => {
+    if (!e.touches || e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!e.changedTouches || e.changedTouches.length !== 1) return;
+    if (window.innerWidth > 768) return;
+
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    if (Math.abs(dy) > 60 || Math.abs(dx) < threshold) return;
+
+    const sidebarOpen = document.getElementById('sidebar').classList.contains('open');
+    if (!sidebarOpen && startX <= 24 && dx > 0) openSidebar();
+    if (sidebarOpen && dx < 0) closeSidebar();
+  }, { passive: true });
+}
+
 // ── Start ──────────────────────────────────────────────────────────────────
 init();
 bindWelcomePrompts();
+initMobileSidebarGesture();
