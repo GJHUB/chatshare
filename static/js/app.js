@@ -45,6 +45,7 @@ async function api(method, path, body) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
+  initTheme();
   document.getElementById('user-name').textContent = user.nickname || user.username || '用户';
   document.getElementById('user-avatar').textContent = (user.nickname || user.username || 'U')[0].toUpperCase();
   document.getElementById('model-name-display').textContent = currentModelName;
@@ -55,7 +56,7 @@ async function init() {
 
 function welcomeTemplate() {
   return `<div class="welcome" id="welcome">
-    <div class="welcome-icon">✦</div>
+    <div class="welcome-icon">🍲</div>
     <h2>有什么可以帮你的？</h2>
     <p>选择模型，开始你的 AI 之旅</p>
     <div class="quick-prompts">
@@ -87,6 +88,28 @@ function bindWelcomePrompts() {
 function isImageVideoModel(id) {
   const mids = ['4o-image','Nano-banana','Nano-banana-Pro','即梦-4.0画图模型','即梦-4.1画图模型','即梦-4.5画图模型','Veo_3_1','即梦3.0视频模型'];
   return mids.includes(id);
+}
+
+
+function initTheme() {
+  const theme = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  updateThemeIcon(theme);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  updateThemeIcon(next);
+}
+
+function updateThemeIcon(theme) {
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  btn.title = theme === 'dark' ? '切换到白色主题' : '切换到深色主题';
 }
 
 // ── Models ─────────────────────────────────────────────────────────────────

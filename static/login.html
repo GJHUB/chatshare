@@ -3,35 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ChatShare - 登录</title>
+<title>咕嘟 - 登录</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body.login-page{
-  min-height:100vh;display:flex;align-items:center;justify-content:center;
-  font-family: "Segoe UI", "PingFang SC", sans-serif;color:#e8e8f0;
-  background:#1a1b2e;
-  background-image:radial-gradient(ellipse at 30% 20%, rgba(16,163,127,.12) 0%, transparent 50%),radial-gradient(ellipse at 70% 80%, rgba(14,165,233,.08) 0%, transparent 50%);
-}
-.card{background:rgba(37,38,64,.8);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:44px 36px;width:100%;max-width:420px;box-shadow:0 16px 48px rgba(0,0,0,.3)}
-h1{font-size:28px;font-weight:700;margin-bottom:8px;text-align:center;background:linear-gradient(135deg,#10a37f,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.subtitle{color:#8888a8;font-size:14px;text-align:center;margin-bottom:28px}
-.tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:24px}
-.tab{flex:1;padding:10px;text-align:center;cursor:pointer;color:#8888a8;font-size:14px;border-bottom:2px solid transparent;transition:all .2s}
-.tab.active{color:#e8e8f0;border-bottom-color:#10a37f}
+body.login-page{background:#fff;background-image:radial-gradient(ellipse at 50% 30%, rgba(255,107,53,.06) 0%, transparent 60%);font-family:"Segoe UI","PingFang SC",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#18181b}
+.card{background:#fff;border:1px solid #e4e4e7;border-radius:20px;padding:44px 36px;width:100%;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.1)}
+h1{font-size:28px;font-weight:700;margin-bottom:8px;text-align:center;color:#ff6b35}
+.subtitle{color:#71717a;font-size:14px;text-align:center;margin-bottom:28px}
+.tabs{display:flex;border-bottom:1px solid #e4e4e7;margin-bottom:24px}
+.tab{flex:1;padding:10px;text-align:center;cursor:pointer;color:#71717a;font-size:14px;border-bottom:2px solid transparent;transition:all .2s}
+.tab.active{color:#18181b;border-bottom-color:#ff6b35}
 .form-group{margin-bottom:16px}
-label{display:block;font-size:13px;color:#8888a8;margin-bottom:6px}
-input{width:100%;padding:12px 14px;background:rgba(20,21,36,.6);border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#e8e8f0;font-size:14px;outline:none;transition:border-color .3s,box-shadow .3s}
-input:focus{border-color:#10a37f;box-shadow:0 0 0 3px rgba(16,163,127,.15)}
-.btn{width:100%;padding:13px;background:linear-gradient(135deg,#10a37f,#0ea5e9);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:transform .15s,box-shadow .15s}
-.btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(16,163,127,.3)}
-.btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
-.error{color:#f87171;font-size:13px;margin-top:10px;text-align:center;min-height:20px}
+label{display:block;font-size:13px;color:#71717a;margin-bottom:6px}
+input{width:100%;padding:12px 14px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:12px;color:#18181b;font-size:14px;outline:none;transition:border-color .2s,box-shadow .2s}
+input:focus{border-color:#ff6b35;box-shadow:0 0 0 3px rgba(255,107,53,.1)}
+.btn{width:100%;padding:13px;background:#ff6b35;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:all .2s}
+.btn:hover{background:#e85d2c;transform:translateY(-1px);box-shadow:0 4px 16px rgba(255,107,53,.25)}
+.btn:disabled{background:#a1a1aa;cursor:not-allowed;transform:none;box-shadow:none}
+.error{color:#ef4444;font-size:13px;margin-top:10px;text-align:center;min-height:20px}
 </style>
 </head>
 <body class="login-page">
 <div class="card">
-  <h1>ChatShare</h1>
-  <p class="subtitle">AI 对话平台</p>
+  <h1>🍲 咕嘟</h1>
+  <p class="subtitle">AI 智能对话平台</p>
   <div class="tabs">
     <div class="tab active" id="tab-login" onclick="switchTab('login')">登录</div>
     <div class="tab" id="tab-register" onclick="switchTab('register')">注册</div>

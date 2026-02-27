@@ -216,3 +216,79 @@ html,body{background:var(--bg-main);color:var(--text-main)}
 .quick-prompt-card .desc{font-size:12px;color:var(--text-muted);margin-top:4px}
 .msg-wrap{animation:fadeInUp .3s ease-out}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ===== UI Redesign v2.0 ===== */
+:root, [data-theme="light"] {
+  --bg-primary:#ffffff;
+  --bg-sidebar:#f7f7f8;
+  --bg-card:#f4f4f5;
+  --bg-input:#f4f4f5;
+  --bg-code:#f8f8fa;
+  --bg-hover:#ededef;
+  --bg-active:#fff0e8;
+  --border-default:#e4e4e7;
+  --border-focus:#ff6b35;
+  --text-primary:#18181b;
+  --text-secondary:#71717a;
+  --text-placeholder:#a1a1aa;
+  --brand:#ff6b35;
+  --brand-hover:#e85d2c;
+  --brand-light:#fff0e8;
+  --msg-user-bg:#ff6b35;
+  --msg-user-text:#ffffff;
+  --msg-ai-border:#ffd4bc;
+}
+[data-theme="dark"] {
+  --bg-primary:#1a1a1a;
+  --bg-sidebar:#141414;
+  --bg-card:#262626;
+  --bg-input:#262626;
+  --bg-code:#1e1e1e;
+  --bg-hover:#2a2a2a;
+  --bg-active:rgba(255,107,53,.1);
+  --border-default:#3a3a3a;
+  --border-focus:#ff6b35;
+  --text-primary:#ececec;
+  --text-secondary:#888888;
+  --text-placeholder:#555555;
+  --brand:#ff6b35;
+  --brand-hover:#ff8f5e;
+  --brand-light:rgba(255,107,53,.15);
+  --msg-user-bg:#ff6b35;
+  --msg-user-text:#ffffff;
+  --msg-ai-border:rgba(255,107,53,.3);
+}
+*{transition:background-color .25s,color .25s,border-color .25s}
+html,body{background:var(--bg-primary)!important;color:var(--text-primary)!important}
+.main{background:var(--bg-primary)!important}
+.sidebar{background:var(--bg-sidebar)!important;border-right:1px solid var(--border-default)}
+.sidebar-search input,.input-wrap,.model-dropdown,.retry-menu,.retry-model-picker,.file-preview-area,.upload-menu{background:var(--bg-card)!important;color:var(--text-primary)}
+.sidebar-label,.user-plan,.input-hint{color:var(--text-secondary)!important}
+.conv-item:hover,.model-item:hover,.upload-menu-item:hover{background:var(--bg-hover)!important}
+.conv-item.active{background:var(--bg-active)!important;border-left:3px solid var(--brand)}
+.new-chat-btn{border:1px solid var(--border-default)}
+.new-chat-btn:hover{background:var(--brand-light)!important;border-color:var(--brand);color:var(--brand)}
+.model-selector-btn{background:var(--bg-primary)!important;border:1px solid var(--border-default);color:var(--text-primary)}
+.model-selector-btn:hover{background:var(--brand-light)!important;border-color:var(--brand)}
+.model-item.active{background:var(--brand-light)!important;color:var(--brand)!important}
+#msg-input{color:var(--text-primary)!important}
+#msg-input::placeholder{color:var(--text-placeholder)!important}
+.input-wrap{background:var(--bg-input)!important;border:1px solid var(--border-default)!important}
+.input-wrap:focus-within{border-color:var(--brand)!important;box-shadow:0 0 0 3px rgba(255,107,53,.1)!important}
+.send-btn,.edit-save-btn{background:var(--brand)!important}
+.send-btn:hover,.edit-save-btn:hover{background:var(--brand-hover)!important}
+.attach-btn{color:var(--text-secondary)!important;border-color:var(--border-default)!important}
+.attach-btn:hover{color:var(--brand)!important;border-color:var(--brand)!important;background:var(--brand-light)!important}
+.msg-user .msg-content{background:var(--msg-user-bg)!important;color:var(--msg-user-text)!important;border-radius:20px 20px 4px 20px}
+.msg-assistant .msg-content{color:var(--text-primary)!important;border-left:2px solid var(--msg-ai-border)!important;padding-left:14px}
+.msg-assistant .msg-content pre{background:var(--bg-code)!important;border:1px solid var(--border-default)!important}
+.msg-assistant .msg-content th{background:var(--bg-sidebar)!important}
+.msg-assistant .msg-content th,.msg-assistant .msg-content td{border-color:var(--border-default)!important}
+.msg-assistant .msg-content a,.cursor{color:var(--brand)!important}
+.welcome-icon{background:var(--brand-light)!important}
+.welcome h2{color:var(--text-primary)!important}
+.welcome p,.quick-prompt-card .desc{color:var(--text-secondary)!important}
+.quick-prompt-card{background:var(--bg-primary)!important;border:1px solid var(--border-default)!important;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.quick-prompt-card:hover{border-color:var(--brand)!important;box-shadow:0 4px 12px rgba(0,0,0,.12);transform:translateY(-2px)}
+.theme-toggle{background:none;border:1px solid var(--border-default);border-radius:8px;padding:4px 8px;cursor:pointer;color:var(--text-primary)}
+.theme-toggle:hover{border-color:var(--brand);background:var(--brand-light)}
