@@ -438,18 +438,14 @@ async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, pa
 
 async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, username, chatshare_conv_id=None, last_message_id=None, attachments=None):
     """Core streaming logic shared by send/edit/retry. Yields SSE chunks."""
-    # Convert transformed display file_id back to upstream original file_id for official API calls
+    # Experiment mode: keep transformed file_id in conversation payload
     upstream_attachments = None
     if attachments:
         upstream_attachments = []
         for item in attachments:
             if not isinstance(item, dict):
                 continue
-            copied = dict(item)
-            fid = copied.get("id")
-            if fid:
-                copied["id"] = _to_upstream_file_id(request, fid)
-            upstream_attachments.append(copied)
+            upstream_attachments.append(dict(item))
     channel, chatshare_model = resolve_model(model)
     if upstream_attachments and any(str(a.get("mime_type", "")).startswith("image/") for a in upstream_attachments if isinstance(a, dict)):
         chatshare_model = "gpt-5-2-instant"
