@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ChatShare</title>
-<link rel="stylesheet" href="/static/css/style.css?v=1.4.12">
+<link rel="stylesheet" href="/static/css/style.css?v=1.5.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 </head>
 <body>
@@ -54,8 +54,20 @@
     <!-- Messages -->
     <div class="messages" id="messages">
       <div class="welcome" id="welcome">
+        <div class="welcome-icon">✦</div>
         <h2>有什么可以帮你的？</h2>
-        <p>选择模型，开始对话</p>
+        <p>选择模型，开始你的 AI 之旅</p>
+        <div class="quick-prompts">
+          <div class="quick-prompt-card" data-prompt="帮我写一个 Python 脚本来整理日志文件">
+            <div class="icon">💡</div><div class="title">写代码</div><div class="desc">帮我写一个 Python 脚本</div>
+          </div>
+          <div class="quick-prompt-card" data-prompt="帮我写一篇关于 AI 代理设计的短文">
+            <div class="icon">📝</div><div class="title">写文章</div><div class="desc">帮我写一篇关于AI的短文</div>
+          </div>
+          <div class="quick-prompt-card" data-prompt="生成一张未来城市夜景图片">
+            <div class="icon">🎨</div><div class="title">画图片</div><div class="desc">生成一张未来城市夜景</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -83,6 +95,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="/static/js/app.js?v=1.4.14"></script>
+<script src="/static/js/app.js?v=1.5.0"></script>
 </body>
 </html>

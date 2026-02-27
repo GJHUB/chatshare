@@ -172,3 +172,47 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .file-remove:hover{color:#ff6b6b}
 .file-progress{width:100%;height:4px;background:#555;border-radius:2px;margin-top:4px;overflow:hidden}
 .file-progress-bar{height:100%;background:#10a37f;border-radius:2px;transition:width .3s}
+
+/* message attachment preview */
+.msg-attachments{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-bottom:8px}
+.msg-attachment-item{background:#2f2f2f;border:1px solid #454545;border-radius:8px;padding:6px 8px;font-size:12px;color:#ddd;max-width:260px}
+.msg-attachment-item.image{padding:6px}
+.msg-attachment-thumb{display:block;width:140px;max-height:100px;object-fit:cover;border-radius:6px;margin-bottom:4px}
+.msg-attachment-meta{font-size:12px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ===== UI Redesign v1.0 overrides ===== */
+:root{
+  --bg-main:#1a1b2e;
+  --bg-side:#141524;
+  --bg-card:#252640;
+  --text-main:#e8e8f0;
+  --text-muted:#8888a8;
+  --brand-a:#10a37f;
+  --brand-b:#0ea5e9;
+}
+html,body{background:var(--bg-main);color:var(--text-main)}
+.main{background:radial-gradient(ellipse at 85% 8%, rgba(14,165,233,.08), transparent 45%),radial-gradient(ellipse at 10% 90%, rgba(16,163,127,.08), transparent 45%),var(--bg-main)}
+.sidebar{background:var(--bg-side)}
+.sidebar-search input,.input-wrap,.model-dropdown,.retry-menu,.retry-model-picker,.file-preview-area{background:var(--bg-card)}
+.conv-item:hover{background:rgba(255,255,255,.06)}
+.conv-item.active{background:rgba(255,255,255,.08);border-left:3px solid var(--brand-a)}
+.new-chat-btn{border:1px solid rgba(16,163,127,.35)}
+.new-chat-btn:hover{background:rgba(16,163,127,.1);box-shadow:0 0 12px rgba(16,163,127,.15)}
+.user-avatar{background:linear-gradient(135deg,var(--brand-a),var(--brand-b))}
+.model-selector-btn:hover{background:rgba(255,255,255,.06);border-color:rgba(16,163,127,.4)}
+.model-item.active{color:var(--brand-a);background:rgba(16,163,127,.08)}
+.msg-user .msg-content{background:linear-gradient(135deg,var(--brand-a),var(--brand-b));color:#fff;box-shadow:0 2px 8px rgba(16,163,127,.25)}
+.msg-assistant .msg-content{border-left:2px solid rgba(16,163,127,.3);padding-left:16px}
+.input-wrap{border:1px solid rgba(255,255,255,.08)}
+.input-wrap:focus-within{border-color:rgba(16,163,127,.4);box-shadow:0 0 0 3px rgba(16,163,127,.08)}
+.send-btn{background:linear-gradient(135deg,var(--brand-a),var(--brand-b))}
+.send-btn:hover{transform:scale(1.05);box-shadow:0 4px 12px rgba(16,163,127,.3)}
+.welcome-icon{width:56px;height:56px;background:linear-gradient(135deg,var(--brand-a),var(--brand-b));border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(16,163,127,.2)}
+.quick-prompts{display:flex;gap:12px;margin-top:24px;flex-wrap:wrap;justify-content:center}
+.quick-prompt-card{background:rgba(37,38,64,.65);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px;width:180px;cursor:pointer;transition:all .2s}
+.quick-prompt-card:hover{background:rgba(37,38,64,.95);border-color:rgba(16,163,127,.35);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.quick-prompt-card .icon{font-size:22px;margin-bottom:8px}
+.quick-prompt-card .title{font-size:14px;font-weight:600;color:var(--text-main)}
+.quick-prompt-card .desc{font-size:12px;color:var(--text-muted);margin-top:4px}
+.msg-wrap{animation:fadeInUp .3s ease-out}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}

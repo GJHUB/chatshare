@@ -52,6 +52,43 @@ async function init() {
   await loadConversations();
 }
 
+
+function welcomeTemplate() {
+  return `<div class="welcome" id="welcome">
+    <div class="welcome-icon">✦</div>
+    <h2>有什么可以帮你的？</h2>
+    <p>选择模型，开始你的 AI 之旅</p>
+    <div class="quick-prompts">
+      <div class="quick-prompt-card" data-prompt="帮我写一个 Python 脚本来整理日志文件">
+        <div class="icon">💡</div><div class="title">写代码</div><div class="desc">帮我写一个 Python 脚本</div>
+      </div>
+      <div class="quick-prompt-card" data-prompt="帮我写一篇关于 AI 代理设计的短文">
+        <div class="icon">📝</div><div class="title">写文章</div><div class="desc">帮我写一篇关于AI的短文</div>
+      </div>
+      <div class="quick-prompt-card" data-prompt="生成一张未来城市夜景图片">
+        <div class="icon">🎨</div><div class="title">画图片</div><div class="desc">生成一张未来城市夜景</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindWelcomePrompts() {
+  document.querySelectorAll('.quick-prompt-card').forEach(card => {
+    card.onclick = () => {
+      const text = card.dataset.prompt || '';
+      const input = document.getElementById('msg-input');
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    };
+  });
+}
+
+function isImageVideoModel(id) {
+  const mids = ['4o-image','Nano-banana','Nano-banana-Pro','即梦-4.0画图模型','即梦-4.1画图模型','即梦-4.5画图模型','Veo_3_1','即梦3.0视频模型'];
+  return mids.includes(id);
+}
+
 // ── Models ─────────────────────────────────────────────────────────────────
 async function loadModels() {
   try {
@@ -85,6 +122,13 @@ function staticModelGroups() {
     ]},
     { group: 'Deepseek 系列', models: [
       {id:'deepseek-v3',name:'Deepseek V3'},{id:'deepseek-r1',name:'Deepseek R1'}
+    ]},
+    { group: '图片生成模型', models: [
+      {id:'4o-image',name:'4o-image'},{id:'Nano-banana',name:'Nano-banana'},{id:'Nano-banana-Pro',name:'Nano-banana-Pro'},
+      {id:'即梦-4.0画图模型',name:'即梦 4.0 画图'},{id:'即梦-4.1画图模型',name:'即梦 4.1 画图'},{id:'即梦-4.5画图模型',name:'即梦 4.5 画图'}
+    ]},
+    { group: '视频生成模型', models: [
+      {id:'Veo_3_1',name:'Veo 3.1'},{id:'即梦3.0视频模型',name:'即梦 3.0 视频'}
     ]},
     { group: 'Codex 编程系列', models: [
       {id:'codex-5.2',name:'GPT-5.2 Codex'},{id:'codex-5.2-max',name:'GPT-5.2 Codex Max'},
@@ -214,8 +258,8 @@ async function loadConversation(convId) {
 async function newConversation() {
   currentConvId = null;
   currentMessages = [];
-  document.getElementById('messages').innerHTML =
-    '<div class="welcome" id="welcome"><h2>有什么可以帮你的？</h2><p>选择模型，开始对话</p></div>';
+  document.getElementById('messages').innerHTML = welcomeTemplate();
+  bindWelcomePrompts();
   renderConversations();
   document.getElementById('msg-input').focus();
   closeSidebar();
@@ -485,6 +529,10 @@ async function sendMessage() {
       alert('文件上传未成功，已中断本次发送');
       return;
     }
+  }
+
+  if (isImageVideoModel(currentModel) && currentConvId) {
+    await newConversation();
   }
 
   if (!currentConvId) {
@@ -900,3 +948,4 @@ document.getElementById('search-input').addEventListener('input', renderConversa
 
 // ── Start ──────────────────────────────────────────────────────────────────
 init();
+bindWelcomePrompts();
