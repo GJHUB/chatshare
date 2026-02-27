@@ -935,7 +935,10 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         # Parse multipart form data properly
         form = await request.form()
         file_field = form.get("file")
-        use_case = form.get("use_case", "multimodal")
+        raw_use_case = form.get("use_case")
+        use_case = str(raw_use_case).strip() if raw_use_case is not None else ""
+        if not use_case:
+            use_case = "multimodal"
 
         if not file_field:
             raise HTTPException(status_code=400, detail="No file provided")
@@ -953,7 +956,7 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
 
         # Forward as multipart using httpx files parameter
         files = {"file": (file_name, file_content, file_content_type)}
-        data = {"use_case": use_case}
+        data = {"use_case": use_case, "useCase": use_case}
 
         upload_api_url = f"{session.sass_url}/backend-api/files"
         _log_upstream_request(upload_api_url, {"file_name": file_name, "mime_type": file_content_type, "size": len(file_content), "use_case": use_case})
@@ -979,7 +982,7 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
                 resp = await session._client.post(
                     f"{session.sass_url}/backend-api/files",
                     files={"file": (file_name, file_content, file_content_type)},
-                    data={"use_case": use_case},
+                    data={"use_case": use_case, "useCase": use_case},
                     headers=auth_headers,
                     timeout=60,
                 )
