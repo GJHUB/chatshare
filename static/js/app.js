@@ -967,6 +967,23 @@ msgInput.addEventListener('input', function() {
 msgInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
+
+// ── Ctrl+V 粘贴文件/图片自动上传 ──
+msgInput.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const files = [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  if (files.length > 0) {
+    e.preventDefault();
+    handleFilesSelected(files);
+  }
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.retry-menu.show').forEach(m => {
     m.classList.remove('show');
@@ -1003,7 +1020,30 @@ function initMobileSidebarGesture() {
   }, { passive: true });
 }
 
+function initImageLightbox() {
+  const modal = document.createElement('div');
+  modal.id = 'image-lightbox';
+  modal.className = 'image-lightbox hidden';
+  modal.innerHTML = '<img id="image-lightbox-img" alt="preview">';
+  modal.addEventListener('click', () => modal.classList.add('hidden'));
+  document.body.appendChild(modal);
+
+  document.getElementById('messages').addEventListener('click', e => {
+    const target = e.target;
+    if (!(target instanceof HTMLImageElement)) return;
+    if (!target.closest('.assistant-msg')) return;
+    const img = document.getElementById('image-lightbox-img');
+    img.src = target.src;
+    modal.classList.remove('hidden');
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') modal.classList.add('hidden');
+  });
+}
+
 // ── Start ──────────────────────────────────────────────────────────────────
 init();
 bindWelcomePrompts();
 initMobileSidebarGesture();
+initImageLightbox();

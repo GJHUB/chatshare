@@ -349,3 +349,38 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
   .model-bar{padding-left:62px!important}
   .overlay.show{backdrop-filter:blur(1px)}
 }
+
+/* AI image/video result sizing */
+.assistant-msg img{
+  display:block;
+  max-width:280px;
+  width:auto;
+  height:auto;
+  max-height:280px;
+  border-radius:10px;
+  margin:8px 0;
+  cursor:zoom-in;
+  box-shadow:0 2px 10px rgba(0,0,0,.12);
+}
+
+@media (max-width: 768px) {
+  .assistant-msg img{max-width:220px;max-height:220px}
+}
+
+.image-lightbox{
+  position:fixed;
+  inset:0;
+  z-index:999;
+  background:rgba(0,0,0,.72);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+.image-lightbox.hidden{display:none}
+.image-lightbox img{
+  max-width:min(92vw, 980px);
+  max-height:90vh;
+  border-radius:12px;
+  cursor:zoom-out;
+}
