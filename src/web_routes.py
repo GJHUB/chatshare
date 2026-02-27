@@ -1025,7 +1025,15 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         file_id = result.get("file_id") or result.get("id")
         transformed_file_id = file_id
         if isinstance(file_id, str) and file_id.startswith("saasnexus--"):
-            transformed_file_id = f"saasnexus-multimodal-{uuid.uuid4().hex[:8]}-{len(file_content)}"
+            # transform: saasnexus--xxxxxxxx- -> saasnexus-multimodal-xxxxxxxx-<file_size>
+            core = file_id
+            try:
+                core = file_id[len("saasnexus--"):]
+                if core.endswith("-"):
+                    core = core[:-1]
+            except Exception:
+                core = file_id.replace("saasnexus--", "").strip("-")
+            transformed_file_id = f"saasnexus-multimodal-{core}-{len(file_content)}"
             _file_id_alias_map(request)[transformed_file_id] = file_id
             result["file_id_origin"] = file_id
             result["file_id"] = transformed_file_id
