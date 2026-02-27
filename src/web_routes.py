@@ -613,6 +613,17 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                     if resp.status_code == 401:
                         logger.warning(f"GPT/sass 401 (attempt {attempt+1}), refreshing session")
                         dispatcher.release_car(current_session)
+
+                        # For gpt/grok/deepseek channels, drop the stale car session to avoid reusing
+                        # the same expired cookies on retry.
+                        if channel != "sass":
+                            try:
+                                if getattr(current_session, "car_id", None):
+                                    dispatcher.car_sessions.get(channel, {}).pop(current_session.car_id, None)
+                                await current_session.close()
+                            except Exception:
+                                pass
+
                         if attempt < max_retries - 1:
                             try:
                                 if channel == "sass":
@@ -628,11 +639,11 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                                 headers = current_session.get_conversation_headers(sentinel_token) if channel == "sass" else current_session.get_headers()
                             except Exception as e2:
                                 logger.error(f"Session refresh failed: {e2}")
-                                yield f"data: {json.dumps({'error': 'Session expired'})}\n\n"
+                                yield f"data: {json.dumps({'error': '图片/视频通道登录态已过期，请稍后重试或刷新上游登录'})}\n\n"
                                 yield "data: [DONE]\n\n"
                                 return
                             continue
-                        yield f"data: {json.dumps({'error': 'Session expired'})}\n\n"
+                        yield f"data: {json.dumps({'error': '图片/视频通道登录态已过期，请稍后重试或刷新上游登录'})}\n\n"
                         yield "data: [DONE]\n\n"
                         return
 
