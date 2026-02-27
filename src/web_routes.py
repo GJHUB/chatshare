@@ -150,6 +150,18 @@ async def list_models(current_user: dict = Depends(get_current_user)):
             {"id": "deepseek-v3", "name": "Deepseek V3"},
             {"id": "deepseek-r1", "name": "Deepseek R1"},
         ]},
+        {"group": "图片生成模型", "models": [
+            {"id": "4o-image", "name": "4o-image"},
+            {"id": "Nano-banana", "name": "Nano-banana"},
+            {"id": "Nano-banana-Pro", "name": "Nano-banana-Pro"},
+            {"id": "即梦-4.0画图模型", "name": "即梦 4.0 画图"},
+            {"id": "即梦-4.1画图模型", "name": "即梦 4.1 画图"},
+            {"id": "即梦-4.5画图模型", "name": "即梦 4.5 画图"},
+        ]},
+        {"group": "视频生成模型", "models": [
+            {"id": "Veo_3_1", "name": "Veo 3.1"},
+            {"id": "即梦3.0视频模型", "name": "即梦 3.0 视频"},
+        ]},
         {"group": "Codex 编程系列", "models": [
             {"id": "codex-5.2", "name": "GPT-5.2 Codex"},
             {"id": "codex-5.2-max", "name": "GPT-5.2 Codex Max"},
