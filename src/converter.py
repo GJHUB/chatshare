@@ -77,6 +77,16 @@ MODEL_MAP = {
     "GPT-5.2-codex": ("sass", "GPT-5.2-codex"),
     "GPT-5.2-codex-max": ("sass", "GPT-5.2-codex-max"),
     "GPT-5.3-codex": ("sass", "GPT-5.3-codex"),
+
+    # 图片/视频模型（强制走 sass-node2）
+    "4o-image": ("sass", "4o-image"),
+    "Nano-banana": ("sass", "Nano-banana"),
+    "Nano-banana-Pro": ("sass", "Nano-banana-Pro"),
+    "即梦-4.0画图模型": ("sass", "即梦-4.0画图模型"),
+    "即梦-4.1画图模型": ("sass", "即梦-4.1画图模型"),
+    "即梦-4.5画图模型": ("sass", "即梦-4.5画图模型"),
+    "Veo_3_1": ("sass", "Veo_3_1"),
+    "即梦3.0视频模型": ("sass", "即梦3.0视频模型"),
 }
 
 

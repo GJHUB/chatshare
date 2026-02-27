@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+MEDIA_GEN_MODELS = {
+    "4o-image",
+    "Nano-banana",
+    "Nano-banana-Pro",
+    "即梦-4.0画图模型",
+    "即梦-4.1画图模型",
+    "即梦-4.5画图模型",
+    "Veo_3_1",
+    "即梦3.0视频模型",
+}
+
 
 def _truncate(value: str, limit: int = 1200) -> str:
     if value is None:
@@ -459,8 +470,7 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                 continue
             upstream_attachments.append(dict(item))
     channel, chatshare_model = resolve_model(model)
-    if upstream_attachments and any(str(a.get("mime_type", "")).startswith("image/") for a in upstream_attachments if isinstance(a, dict)):
-        chatshare_model = "gpt-5-2-instant"
+    is_media_gen_model = model in MEDIA_GEN_MODELS or chatshare_model in MEDIA_GEN_MODELS
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     # Acquire session
@@ -486,7 +496,12 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                 session = await dispatcher.get_sass_session()
             session.is_busy = True
             sentinel_token = await session.get_sentinel_token()
-            # HAR successful flow uses /backend-api/f/conversation for attachment chat
+
+            if is_media_gen_model:
+                prepared = await session.prepare(chatshare_model)
+                logger.info("Media model prepare: model=%s prepared=%s", chatshare_model, prepared)
+
+            # HAR flow: use /backend-api/f/conversation
             url = session.get_conversation_url()
             headers = session.get_conversation_headers(sentinel_token)
             backend_request = openai_to_backend_sass(messages, chatshare_model, conversation_id=chatshare_conv_id, parent_message_id=last_message_id, attachments=upstream_attachments)
@@ -644,10 +659,10 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                                     current_session = await dispatcher.select_car(channel)
                                 current_session.is_busy = True
                                 sentinel_token = await current_session.get_sentinel_token() if channel == "sass" else None
-                                if channel == "sass" and attachments:
-                                    url = f"{current_session.sass_url}/backend-api/conversation"
-                                else:
-                                    url = current_session.get_conversation_url()
+                                if channel == "sass" and is_media_gen_model:
+                                    prepared = await current_session.prepare(chatshare_model)
+                                    logger.info("Media model prepare on retry: model=%s prepared=%s", chatshare_model, prepared)
+                                url = current_session.get_conversation_url()
                                 headers = current_session.get_conversation_headers(sentinel_token) if channel == "sass" else current_session.get_headers()
                             except Exception as e2:
                                 logger.error(f"Session refresh failed: {e2}")
