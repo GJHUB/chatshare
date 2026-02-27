@@ -331,6 +331,15 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
     transition:opacity .2s, transform .2s;
   }
 
+  .sidebar{
+    z-index:320 !important;
+    box-shadow:0 14px 40px rgba(0,0,0,.22);
+  }
+
+  .overlay{
+    z-index:300 !important;
+  }
+
   .sidebar.open ~ .main .hamburger{
     opacity:0;
     pointer-events:none;
@@ -338,6 +347,5 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
   }
 
   .model-bar{padding-left:62px!important}
-  .sidebar{box-shadow:0 14px 40px rgba(0,0,0,.22)}
   .overlay.show{backdrop-filter:blur(1px)}
 }
