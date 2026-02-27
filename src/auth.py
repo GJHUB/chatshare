@@ -43,9 +43,11 @@ class ChatShareAuth:
             "password": encrypted_pwd,
             "timestamp": timestamp,
         }
+        logger.info(f"Official API request: url={url} payload={payload}")
         resp = await self._client.post(url, json=payload)
-        resp.raise_for_status()
         data = resp.json()
+        logger.info(f"Official API response: url={url} status={resp.status_code} body={str(data)[:1200]}")
+        resp.raise_for_status()
 
         # 从 cookie 或响应体获取 token
         token = resp.cookies.get("token")

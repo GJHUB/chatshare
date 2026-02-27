@@ -18,6 +18,40 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _truncate(value: str, limit: int = 1200) -> str:
+    if value is None:
+        return ""
+    s = str(value)
+    return s if len(s) <= limit else s[:limit] + "...<truncated>"
+
+
+def _log_upstream_request(url: str, payload=None):
+    try:
+        if payload is None:
+            logger.info("Official API request: url=%s", url)
+        elif isinstance(payload, (dict, list)):
+            logger.info("Official API request: url=%s payload=%s", url, _truncate(json.dumps(payload, ensure_ascii=False)))
+        elif isinstance(payload, (bytes, bytearray)):
+            logger.info("Official API request: url=%s payload_bytes=%s", url, len(payload))
+        else:
+            logger.info("Official API request: url=%s payload=%s", url, _truncate(payload))
+    except Exception:
+        pass
+
+
+def _log_upstream_response(url: str, status: int, body=None):
+    try:
+        if body is None:
+            logger.info("Official API response: url=%s status=%s", url, status)
+        elif isinstance(body, (bytes, bytearray)):
+            txt = body.decode("utf-8", errors="ignore")
+            logger.info("Official API response: url=%s status=%s body=%s", url, status, _truncate(txt))
+        else:
+            logger.info("Official API response: url=%s status=%s body=%s", url, status, _truncate(body))
+    except Exception:
+        pass
+
+
 def _file_session_map(request: Request) -> dict:
     m = getattr(request.app.state, "file_upload_session_map", None)
     if m is None:
@@ -318,8 +352,10 @@ async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, pa
 
     parser = SSEParser(model, chunk_id)
     try:
+        _log_upstream_request(url, variant_request)
         async with session._client.stream("POST", url, json=variant_request, headers=headers, timeout=120) as resp:
             logger.info(f"Variant response status: {resp.status_code}")
+            _log_upstream_response(url, resp.status_code)
             if resp.status_code == 401:
                 logger.warning("Variant 401, session expired")
                 yield f"data: {json.dumps({'error': 'Session expired'})}\n\n"
@@ -550,7 +586,9 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
         success = False
         for attempt in range(max_retries):
             try:
+                _log_upstream_request(url, backend_request)
                 async with current_session._client.stream("POST", url, json=backend_request, headers=headers, timeout=120) as resp:
+                    _log_upstream_response(url, resp.status_code)
                     if resp.status_code == 401:
                         logger.warning(f"GPT/sass 401 (attempt {attempt+1}), refreshing session")
                         dispatcher.release_car(current_session)
@@ -585,6 +623,7 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                             msg = err.get("detail") or err.get("error") or body.decode("utf-8", errors="ignore")[:300]
                         except Exception:
                             msg = body.decode("utf-8", errors="ignore")[:300] or f"HTTP {resp.status_code}"
+                        _log_upstream_response(url, resp.status_code, msg)
                         logger.warning(
                             "Conversation non-SSE response: status=%s, ct=%s, body=%s, model=%s, conv_id=%s, parent=%s",
                             resp.status_code,
@@ -916,8 +955,10 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         files = {"file": (file_name, file_content, file_content_type)}
         data = {"use_case": use_case}
 
+        upload_api_url = f"{session.sass_url}/backend-api/files"
+        _log_upstream_request(upload_api_url, {"file_name": file_name, "mime_type": file_content_type, "size": len(file_content), "use_case": use_case})
         resp = await session._client.post(
-            f"{session.sass_url}/backend-api/files",
+            upload_api_url,
             files=files,
             data=data,
             headers=auth_headers,
@@ -947,8 +988,9 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
                 raise HTTPException(status_code=401, detail="SaaS Nexus 用户状态校验失败")
 
         result = resp.json()
+        _log_upstream_response(upload_api_url, resp.status_code, json.dumps(result, ensure_ascii=False))
 
-        # Normalize and rewrite upload_url to proxy path
+        # Keep original upload_url from ChatShare, and provide a proxy-safe path field
         file_id = result.get("file_id") or result.get("id")
         upload_url = result.get("upload_url")
         if isinstance(upload_url, str) and upload_url:
@@ -956,7 +998,8 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
                 from urllib.parse import urlparse
                 p = urlparse(upload_url)
                 if p.path.startswith("/file_upload/"):
-                    result["upload_url"] = p.path + (("?" + p.query) if p.query else "")
+                    result["upload_url_origin"] = upload_url
+                    result["upload_proxy_url"] = p.path + (("?" + p.query) if p.query else "")
             except Exception:
                 pass
 
@@ -1024,12 +1067,15 @@ async def proxy_process_upload_stream(request: Request, current_user: dict = Dep
         headers = session.get_conversation_headers(sentinel_token)
         headers["Content-Type"] = "application/json"
 
+        process_url = f"{session.sass_url}/backend-api/files/process_upload_stream"
+        _log_upstream_request(process_url, payload)
         resp = await session._client.post(
-            f"{session.sass_url}/backend-api/files/process_upload_stream",
+            process_url,
             headers=headers,
             content=body,
             timeout=120,
         )
+        _log_upstream_response(process_url, resp.status_code, resp.content[:400])
 
         resp_ct = resp.headers.get("content-type", "application/json")
         return Response(content=resp.content, status_code=resp.status_code, media_type=resp_ct.split(";")[0])
@@ -1061,6 +1107,7 @@ async def proxy_backend_api(path: str, request: Request, current_user: dict = De
             headers["Content-Type"] = content_type
 
         body = await request.body()
+        _log_upstream_request(upstream_url, body)
         resp = await session._client.request(
             request.method,
             upstream_url,
@@ -1068,6 +1115,7 @@ async def proxy_backend_api(path: str, request: Request, current_user: dict = De
             content=body if body else None,
             timeout=120,
         )
+        _log_upstream_response(upstream_url, resp.status_code, resp.content[:400])
 
         # 401 retry once
         if resp.status_code == 401:
@@ -1123,6 +1171,7 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
         headers.pop("Accept", None)
 
         body = await request.body()
+        _log_upstream_request(upstream_url, body)
         resp = await session._client.request(
             request.method,
             upstream_url,
@@ -1130,6 +1179,7 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
             content=body if body else None,
             timeout=120,
         )
+        _log_upstream_response(upstream_url, resp.status_code, resp.content[:400])
 
         if resp.status_code == 401:
             logger.warning(f"file_upload proxy 401 on {path}, refreshing session")
