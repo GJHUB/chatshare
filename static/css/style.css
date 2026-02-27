@@ -328,6 +328,13 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
     border:1px solid var(--border-default);
     box-shadow:0 4px 14px rgba(0,0,0,.12);
     z-index:120;
+    transition:opacity .2s, transform .2s;
+  }
+
+  .sidebar.open ~ .main .hamburger{
+    opacity:0;
+    pointer-events:none;
+    transform:scale(.92);
   }
 
   .model-bar{padding-left:62px!important}
