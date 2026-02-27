@@ -822,6 +822,8 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
         max_retries = 2
         current_session = session
         success = False
+        sent_any_chunk = False
+        sent_done_chunk = False
         for attempt in range(max_retries):
             try:
                 _log_upstream_request(url, backend_request)
@@ -892,6 +894,9 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                         if not line:
                             continue
                         for chunk in parser.parse_line(line):
+                            sent_any_chunk = True
+                            if "[DONE]" in chunk:
+                                sent_done_chunk = True
                             yield chunk
                 break
             except Exception as e:
@@ -902,6 +907,23 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                 yield "data: [DONE]\n\n"
         if not success and not parser.full_text:
             pass  # error already yielded
+
+        # Upstream may return HTTP 200 but no SSE chunks (policy block / empty stream).
+        # Ensure frontend always receives a terminal DONE to avoid endless "thinking".
+        if success and not sent_any_chunk:
+            logger.warning(
+                "Conversation empty stream: model=%s conv_id=%s parent=%s",
+                backend_request.get("model"),
+                backend_request.get("conversation_id"),
+                backend_request.get("parent_message_id"),
+            )
+            yield f"data: {json.dumps({'error': '上游未返回可消费内容，可能触发内容策略限制，请调整问题后重试'})}\n\n"
+            yield "data: [DONE]\n\n"
+        elif success and parser.full_text and not sent_done_chunk:
+            finish = _make_chunk(chunk_id, model, finish_reason="stop")
+            yield f"data: {json.dumps(finish)}\n\n"
+            yield "data: [DONE]\n\n"
+
         dispatcher.release_car(current_session)
         full_text = parser.full_text
 
