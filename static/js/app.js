@@ -353,16 +353,23 @@ async function uploadPendingFiles() {
   for (let i = 0; i < pendingFiles.length; i++) {
     const file = pendingFiles[i];
     showUploadProgress(i, 10);
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('use_case', 'multimodal');
 
     try {
-      // Stage 1: register file
+      // Stage 1: register file (JSON metadata, align with official HAR)
       const registerResp = await fetchWithRetry('/backend-api/files', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          file_name: file.name,
+          file_size: file.size,
+          use_case: 'multimodal',
+          timezone_offset_min: -480,
+          reset_rate_limits: false,
+          mime_type: file.type || 'application/octet-stream',
+        }),
       }, 1);
 
       if (!registerResp.ok) {
@@ -379,7 +386,7 @@ async function uploadPendingFiles() {
       }
 
       // Stage 2: object upload (optional)
-      const uploadUrl = pickField(result, ['upload_url', 'uploadUrl']);
+      const uploadUrl = pickField(result, ['upload_proxy_url', 'upload_url', 'uploadUrl']);
       if (uploadUrl) {
         showUploadProgress(i, 45);
         let uploadPath = uploadUrl;
@@ -413,7 +420,13 @@ async function uploadPendingFiles() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ file_id: fileId }),
+        body: JSON.stringify({
+          file_id: fileId,
+          use_case: 'multimodal',
+          index_for_retrieval: false,
+          file_name: file.name,
+          context_scopes: ['GLOBAL'],
+        }),
       }, 1);
       if (!processResp.ok) {
         alert(`文件 ${file.name} 上传确认失败: ${processResp.status}`);

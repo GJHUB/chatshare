@@ -60,18 +60,6 @@ def _file_session_map(request: Request) -> dict:
     return m
 
 
-def _file_id_alias_map(request: Request) -> dict:
-    m = getattr(request.app.state, "file_id_alias_map", None)
-    if m is None:
-        m = {}
-        request.app.state.file_id_alias_map = m
-    return m
-
-
-def _to_upstream_file_id(request: Request, file_id: str) -> str:
-    amap = _file_id_alias_map(request)
-    return amap.get(file_id, file_id)
-
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -945,7 +933,7 @@ async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Re
 
 @router.post("/backend-api/files")
 async def proxy_file_upload(request: Request, current_user: dict = Depends(get_current_user)):
-    """透传文件上传到 ChatShare"""
+    """透传文件登记到 ChatShare（JSON 元信息，不走 multipart）"""
     dispatcher = request.app.state.dispatcher
     session = None
     try:
@@ -953,139 +941,75 @@ async def proxy_file_upload(request: Request, current_user: dict = Depends(get_c
         session.is_busy = True
         sentinel_token = await session.get_sentinel_token()
 
-        # Parse multipart form data properly
-        form = await request.form()
-        file_field = form.get("file")
-        raw_use_case = form.get("use_case")
-        use_case = str(raw_use_case).strip() if raw_use_case is not None else ""
-        if not use_case:
-            use_case = "multimodal"
+        payload = await request.json()
+        file_name = str(payload.get("file_name") or payload.get("filename") or "").strip()
+        file_size = int(payload.get("file_size") or payload.get("size") or 0)
+        use_case = str(payload.get("use_case") or "multimodal").strip() or "multimodal"
+        timezone_offset_min = int(payload.get("timezone_offset_min", -480))
+        reset_rate_limits = bool(payload.get("reset_rate_limits", False))
 
-        if not file_field:
-            raise HTTPException(status_code=400, detail="No file provided")
+        if not file_name or file_size <= 0:
+            raise HTTPException(status_code=400, detail="file_name/file_size 无效")
 
-        file_content = await file_field.read()
-        file_name = file_field.filename
-        file_content_type = file_field.content_type or "application/octet-stream"
-
-        logger.info(f"File upload: name={file_name}, size={len(file_content)}, type={file_content_type}")
-
-        # Build auth headers (without Content-Type, httpx sets it for multipart)
-        auth_headers = session.get_conversation_headers(sentinel_token)
-        auth_headers.pop("Content-Type", None)
-        auth_headers.pop("Accept", None)
-
-        # Forward as multipart using httpx files parameter
-        files = {"file": (file_name, file_content, file_content_type)}
-        data = {
+        files_req = {
+            "file_name": file_name,
+            "file_size": file_size,
             "use_case": use_case,
-            "reset_rate_limits": "false",
-            "timezone_offset_min": "-480",
+            "timezone_offset_min": timezone_offset_min,
+            "reset_rate_limits": reset_rate_limits,
         }
 
-        upload_api_url = f"{session.sass_url}/backend-api/files"
-        _log_upstream_request(upload_api_url, {
-            "file_name": file_name,
-            "mime_type": file_content_type,
-            "size": len(file_content),
-            "use_case": use_case,
-            "reset_rate_limits": False,
-            "timezone_offset_min": -480,
-        })
-        resp = await session._client.post(
-            upload_api_url,
-            files=files,
-            data=data,
-            headers=auth_headers,
-            timeout=60,
-        )
+        auth_headers = session.get_conversation_headers(sentinel_token)
+        auth_headers["Content-Type"] = "application/json"
+        auth_headers.pop("Accept", None)
 
-        # Handle 401 retry
+        upload_api_url = f"{session.sass_url}/backend-api/files"
+        _log_upstream_request(upload_api_url, files_req)
+        resp = await session._client.post(upload_api_url, json=files_req, headers=auth_headers, timeout=60)
+
         if resp.status_code == 401:
-            logger.warning("File upload 401, refreshing session")
+            logger.warning("File register 401, refreshing session")
             session.is_busy = False
-            try:
-                session = await dispatcher._create_sass_session()
-                session.is_busy = True
-                sentinel_token = await session.get_sentinel_token()
-                auth_headers = session.get_conversation_headers(sentinel_token)
-                auth_headers.pop("Content-Type", None)
-                auth_headers.pop("Accept", None)
-                resp = await session._client.post(
-                    f"{session.sass_url}/backend-api/files",
-                    files={"file": (file_name, file_content, file_content_type)},
-                    data={
-                        "use_case": use_case,
-                        "reset_rate_limits": "false",
-                        "timezone_offset_min": "-480",
-                    },
-                    headers=auth_headers,
-                    timeout=60,
-                )
-            except Exception as e2:
-                logger.error(f"File upload retry failed: {e2}")
-                raise HTTPException(status_code=401, detail="SaaS Nexus 用户状态校验失败")
+            session = await dispatcher._create_sass_session()
+            session.is_busy = True
+            sentinel_token = await session.get_sentinel_token()
+            auth_headers = session.get_conversation_headers(sentinel_token)
+            auth_headers["Content-Type"] = "application/json"
+            auth_headers.pop("Accept", None)
+            resp = await session._client.post(upload_api_url, json=files_req, headers=auth_headers, timeout=60)
 
         result = resp.json()
         _log_upstream_response(upload_api_url, resp.status_code, json.dumps(result, ensure_ascii=False))
 
-        # Keep original upload_url and build transformed file_id experiment id
         file_id = result.get("file_id") or result.get("id")
-        transformed_file_id = file_id
-        if isinstance(file_id, str) and file_id.startswith("saasnexus--"):
-            # transform: saasnexus--xxxxxxxx- -> saasnexus-multimodal-xxxxxxxx-<file_size>
-            core = file_id
-            try:
-                core = file_id[len("saasnexus--"):]
-                if core.endswith("-"):
-                    core = core[:-1]
-            except Exception:
-                core = file_id.replace("saasnexus--", "").strip("-")
-            transformed_file_id = f"saasnexus-multimodal-{core}-{len(file_content)}"
-            _file_id_alias_map(request)[transformed_file_id] = file_id
-            result["file_id_origin"] = file_id
-            result["file_id"] = transformed_file_id
-            if "id" in result:
-                result["id"] = transformed_file_id
-
         upload_url = result.get("upload_url")
         if isinstance(upload_url, str) and upload_url:
             try:
                 from urllib.parse import urlparse
-                p = urlparse(upload_url)
-                if p.path.startswith("/file_upload/"):
+                purl = urlparse(upload_url)
+                if purl.path.startswith("/file_upload/"):
                     result["upload_url_origin"] = upload_url
-                    proxy_path = p.path.replace(file_id, transformed_file_id) if file_id and transformed_file_id else p.path
-                    result["upload_proxy_url"] = proxy_path + (("?" + p.query) if p.query else "")
+                    result["upload_proxy_url"] = purl.path + (("?" + purl.query) if purl.query else "")
                     result["upload_url"] = result["upload_proxy_url"]
             except Exception:
                 pass
 
-        logger.info(f"File upload proxy: status={resp.status_code}, file_id={transformed_file_id or 'N/A'}, response={json.dumps(result, ensure_ascii=False)[:200]}")
+        logger.info(f"File upload proxy: status={resp.status_code}, file_id={file_id or 'N/A'}, response={json.dumps(result, ensure_ascii=False)[:200]}")
 
-        # Bind file_id to the same sass session context for step2/3/conversation
-        if transformed_file_id and session:
+        if file_id and session:
             fmap = _file_session_map(request)
-            fmap[transformed_file_id] = {
-                "session": session,
-                "ts": datetime.utcnow().timestamp(),
-            }
+            fmap[file_id] = {"session": session, "ts": datetime.utcnow().timestamp()}
 
-        # Record file info to database
-        if file_id:
-            try:
+        try:
+            if file_id:
                 pool = await get_pool()
                 async with pool.acquire() as conn:
                     await conn.execute(
-                        "INSERT INTO proxy_files (user_id, file_id, filename, mime_type, size_bytes) "
-                        "VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-                        current_user["id"], file_id,
-                        result.get("name", file_name),
-                        result.get("mime_type", file_content_type),
-                        result.get("size_bytes", len(file_content)),
+                        "INSERT INTO proxy_files (user_id, file_id, filename, mime_type, size_bytes) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                        current_user["id"], file_id, file_name, payload.get("mime_type", ""), file_size,
                     )
-            except Exception as e:
-                logger.error(f"Failed to record file info: {e}")
+        except Exception as e:
+            logger.error(f"Failed to record file info: {e}")
 
         return JSONResponse(content=result, status_code=resp.status_code)
 
@@ -1211,7 +1135,6 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
     session = None
     try:
         incoming_file_id = path
-        upstream_file_id = _to_upstream_file_id(request, incoming_file_id)
 
         fmap = _file_session_map(request)
         bound = fmap.get(incoming_file_id)
@@ -1222,7 +1145,7 @@ async def proxy_file_upload_object(path: str, request: Request, current_user: di
         session.is_busy = True
         sentinel_token = await session.get_sentinel_token()
 
-        upstream_url = f"{session.sass_url}/file_upload/{upstream_file_id}"
+        upstream_url = f"{session.sass_url}/file_upload/{incoming_file_id}"
         if request.url.query:
             upstream_url = f"{upstream_url}?{request.url.query}"
 
