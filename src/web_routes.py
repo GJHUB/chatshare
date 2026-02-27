@@ -90,14 +90,26 @@ async def register(body: RegisterRequest):
 
 
 @router.post("/api/auth/login")
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT id,username,nickname,password FROM chat_users WHERE username=$1", body.username
         )
-    if not user or not verify_password(body.password, user["password"]):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        if not user or not verify_password(body.password, user["password"]):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        real_ip = (forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else None))
+        user_agent = request.headers.get("user-agent", "")
+        try:
+            await conn.execute(
+                "INSERT INTO login_audit (user_id, username, ip, user_agent) VALUES ($1,$2,$3,$4)",
+                user["id"], user["username"], real_ip, user_agent,
+            )
+        except Exception as e:
+            logger.warning(f"write login_audit failed: {e}")
+
     token = create_token(user["id"], user["username"])
     return {"token": token, "user": {"id": user["id"], "username": user["username"], "nickname": user["nickname"]}}
 

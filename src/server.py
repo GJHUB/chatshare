@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from .state import auth, dispatcher, usage_tracker
 from .converter import resolve_model, openai_to_backend, build_non_stream_response, MODEL_MAP, SSEParser
 from .config import API_KEYS, ADMIN_KEY
-from .db import get_pool, close_pool
+from .db import get_pool, close_pool, ensure_schema
 from .web_routes import router as web_router
 
 logger = logging.getLogger(__name__)
@@ -200,10 +200,11 @@ async def startup():
     # Expose dispatcher on app state for web_routes
     app.state.dispatcher = dispatcher
 
-    # Init DB pool
+    # Init DB pool and schema
     try:
         await get_pool()
-        logger.info("Database pool ready")
+        await ensure_schema()
+        logger.info("Database pool and schema ready")
     except Exception as e:
         logger.error(f"Database init failed: {e}")
 
