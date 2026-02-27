@@ -1,10 +1,12 @@
 import uuid
+import asyncio
 import json
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse, Response, JSONResponse
+from pydantic import BaseModel
 
 from .db import get_pool
 from .models import RegisterRequest, LoginRequest, ConversationCreate, ConversationUpdate, MessageCreate
@@ -69,6 +71,23 @@ def _file_session_map(request: Request) -> dict:
         m = {}
         request.app.state.file_upload_session_map = m
     return m
+
+
+def _task_map(request: Request) -> dict:
+    m = getattr(request.app.state, "generate_task_map", None)
+    if m is None:
+        m = {}
+        request.app.state.generate_task_map = m
+    return m
+
+
+def _task_event_text(task: dict, start: int = 0) -> str:
+    text = task.get("partial_text") or ""
+    if start < 0:
+        start = 0
+    if start >= len(text):
+        return ""
+    return text[start:]
 
 
 
@@ -192,6 +211,177 @@ async def list_models(current_user: dict = Depends(get_current_user)):
         ]},
     ]
     return groups
+
+
+
+class GenerateTaskBody(BaseModel):
+    conversation_id: int
+    content: str
+    model: str = "gpt-4o"
+    attachments: list[dict] = []
+
+
+async def _run_generate_task(app, task_id: str, user: dict, body: GenerateTaskBody):
+    task_store = getattr(app.state, "generate_task_map", {})
+    task = task_store.get(task_id)
+    if not task:
+        return
+
+    dispatcher = app.state.dispatcher
+    pool = await get_pool()
+    conv_id = body.conversation_id
+
+    try:
+        async with pool.acquire() as conn:
+            conv = await conn.fetchrow(
+                "SELECT id, chatshare_conv_id, last_message_id FROM chat_conversations WHERE id=$1 AND user_id=$2",
+                conv_id, user["id"],
+            )
+            if not conv:
+                task["status"] = "error"
+                task["error_code"] = "conversation_not_found"
+                task["error_message"] = "Conversation not found"
+                return
+
+            chatshare_conv_id = conv["chatshare_conv_id"]
+            last_msg_id = conv["last_message_id"]
+
+            next_seq = await _get_next_seq(conn, conv_id)
+            await conn.execute(
+                "INSERT INTO chat_messages (conversation_id,role,content,seq,replaced) VALUES ($1,'user',$2,$3,false)",
+                conv_id, body.content, next_seq,
+            )
+
+            history = await conn.fetch(
+                "SELECT role,content FROM chat_messages WHERE conversation_id=$1 AND (replaced IS NULL OR replaced=false) ORDER BY created_at ASC",
+                conv_id,
+            )
+
+            await conn.execute(
+                "UPDATE chat_conversations SET model=$1, updated_at=NOW() WHERE id=$2",
+                body.model, conv_id,
+            )
+
+        minio_msg = {
+            "seq": next_seq, "role": "user", "content": body.content,
+            "timestamp": datetime.utcnow().isoformat() + "Z", "replaced": False,
+        }
+        await _save_to_minio(user["id"], user["username"], conv_id, minio_msg)
+
+        if chatshare_conv_id:
+            messages = [{"role": "user", "content": body.content}]
+        else:
+            messages = [{"role": r["role"], "content": r["content"]} for r in history]
+
+        class _Req:
+            def __init__(self, app):
+                self.app = app
+
+        req = _Req(app)
+        async for chunk in _do_stream(
+            req, dispatcher, conv_id, messages, body.model, user["id"], user["username"],
+            chatshare_conv_id=chatshare_conv_id, last_message_id=last_msg_id, attachments=body.attachments or None,
+        ):
+            if not isinstance(chunk, str) or not chunk.startswith("data: "):
+                continue
+            payload = chunk[6:].strip()
+            if payload == "[DONE]":
+                continue
+            try:
+                obj = json.loads(payload)
+            except Exception:
+                continue
+
+            if isinstance(obj, dict) and obj.get("error"):
+                task["status"] = "error"
+                task["error_code"] = "upstream_error"
+                task["error_message"] = str(obj.get("error"))
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                return
+
+            choices = (obj.get("choices") or []) if isinstance(obj, dict) else []
+            if choices:
+                delta = (choices[0].get("delta") or {})
+                piece = delta.get("content")
+                if piece:
+                    task["partial_text"] += piece
+                    task["offset"] = len(task["partial_text"])
+                    task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+        task["status"] = "done"
+        task["result_text"] = task.get("partial_text", "")
+        task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    except Exception as e:
+        task["status"] = "error"
+        task["error_code"] = "task_exception"
+        task["error_message"] = str(e)
+        task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+
+@router.post("/backend-api/tasks/generate")
+async def create_generate_task(body: GenerateTaskBody, request: Request, current_user: dict = Depends(get_current_user)):
+    task_store = _task_map(request)
+    request_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat() + "Z"
+    task = {
+        "request_id": request_id,
+        "user_id": current_user["id"],
+        "conversation_id": body.conversation_id,
+        "model": body.model,
+        "status": "running",
+        "offset": 0,
+        "partial_text": "",
+        "result_text": "",
+        "error_code": None,
+        "error_message": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    task_store[request_id] = task
+    asyncio.create_task(_run_generate_task(request.app, request_id, current_user, body))
+    return {"request_id": request_id, "status": "running"}
+
+
+@router.get("/backend-api/tasks/{request_id}")
+async def get_generate_task(request_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+    task_store = _task_map(request)
+    task = task_store.get(request_id)
+    if not task or task.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    status = task.get("status")
+    if status == "running":
+        return {
+            "request_id": request_id,
+            "status": "running",
+            "offset": task.get("offset", 0),
+            "partial_text": task.get("partial_text", ""),
+        }
+    if status == "done":
+        return {
+            "request_id": request_id,
+            "status": "done",
+            "offset": task.get("offset", 0),
+            "result_text": task.get("result_text", ""),
+            "usage": None,
+        }
+    return {
+        "request_id": request_id,
+        "status": "error",
+        "error_code": task.get("error_code") or "unknown",
+        "error_message": task.get("error_message") or "unknown error",
+    }
+
+
+@router.get("/backend-api/tasks/{request_id}/events")
+async def get_generate_task_events(request_id: str, request: Request, offset: int = 0, current_user: dict = Depends(get_current_user)):
+    task_store = _task_map(request)
+    task = task_store.get(request_id)
+    if not task or task.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Task not found")
+    delta = _task_event_text(task, offset)
+    return {"request_id": request_id, "status": task.get("status"), "offset": task.get("offset", 0), "events": [delta] if delta else []}
+
 
 
 # ── Conversations ─────────────────────────────────────────────────────────────
