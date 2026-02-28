@@ -2,7 +2,8 @@ import uuid
 import asyncio
 import json
 import logging
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse, Response, JSONResponse
@@ -29,6 +30,8 @@ MEDIA_GEN_MODELS = {
     "Veo_3_1",
     "即梦3.0视频模型",
 }
+
+TASK_TTL_SECONDS = 10 * 60
 
 
 def _truncate(value: str, limit: int = 1200) -> str:
@@ -73,11 +76,33 @@ def _file_session_map(request: Request) -> dict:
     return m
 
 
+def _is_task_expired(task: dict) -> bool:
+    expire_at = task.get("expire_at")
+    if not expire_at:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(expire_at).replace("Z", "+00:00"))
+        return datetime.utcnow() >= dt.replace(tzinfo=None)
+    except Exception:
+        return False
+
+
+def _cleanup_task_map(task_map: dict):
+    stale_ids = []
+    for k, v in task_map.items():
+        status = v.get("status")
+        if status in {"done", "error", "cancelled"} and _is_task_expired(v):
+            stale_ids.append(k)
+    for k in stale_ids:
+        task_map.pop(k, None)
+
+
 def _task_map(request: Request) -> dict:
     m = getattr(request.app.state, "generate_task_map", None)
     if m is None:
         m = {}
         request.app.state.generate_task_map = m
+    _cleanup_task_map(m)
     return m
 
 
@@ -219,6 +244,7 @@ class GenerateTaskBody(BaseModel):
     content: str
     model: str = "gpt-4o"
     attachments: list[dict] = []
+    request_id: str | None = None
 
 
 async def _run_generate_task(app, task_id: str, user: dict, body: GenerateTaskBody):
@@ -232,6 +258,9 @@ async def _run_generate_task(app, task_id: str, user: dict, body: GenerateTaskBo
     conv_id = body.conversation_id
 
     try:
+        if task.get("status") == "cancelled":
+            return
+
         async with pool.acquire() as conn:
             conv = await conn.fetchrow(
                 "SELECT id, chatshare_conv_id, last_message_id FROM chat_conversations WHERE id=$1 AND user_id=$2",
@@ -282,6 +311,8 @@ async def _run_generate_task(app, task_id: str, user: dict, body: GenerateTaskBo
             req, dispatcher, conv_id, messages, body.model, user["id"], user["username"],
             chatshare_conv_id=chatshare_conv_id, last_message_id=last_msg_id, attachments=body.attachments or None,
         ):
+            if task.get("status") == "cancelled":
+                return
             if not isinstance(chunk, str) or not chunk.startswith("data: "):
                 continue
             payload = chunk[6:].strip()
@@ -321,8 +352,33 @@ async def _run_generate_task(app, task_id: str, user: dict, body: GenerateTaskBo
 @router.post("/backend-api/tasks/generate")
 async def create_generate_task(body: GenerateTaskBody, request: Request, current_user: dict = Depends(get_current_user)):
     task_store = _task_map(request)
-    request_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat() + "Z"
+    request_id = (body.request_id or "").strip() or str(uuid.uuid4())
+
+    payload_sig_src = {
+        "conversation_id": body.conversation_id,
+        "content": body.content,
+        "model": body.model,
+        "attachments": body.attachments or [],
+    }
+    payload_sig = hashlib.sha256(json.dumps(payload_sig_src, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+    existed = task_store.get(request_id)
+    if existed:
+        if existed.get("user_id") != current_user["id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if existed.get("payload_sig") != payload_sig:
+            raise HTTPException(status_code=409, detail="request_id conflict with different payload")
+        return {
+            "request_id": request_id,
+            "conversation_id": existed.get("conversation_id"),
+            "status": existed.get("status"),
+            "created_at": existed.get("created_at"),
+            "expire_at": existed.get("expire_at"),
+        }
+
+    now_dt = datetime.utcnow()
+    now = now_dt.isoformat() + "Z"
+    expire_at = (now_dt + timedelta(seconds=TASK_TTL_SECONDS)).isoformat() + "Z"
     task = {
         "request_id": request_id,
         "user_id": current_user["id"],
@@ -336,27 +392,57 @@ async def create_generate_task(body: GenerateTaskBody, request: Request, current
         "error_message": None,
         "created_at": now,
         "updated_at": now,
+        "expire_at": expire_at,
+        "payload_sig": payload_sig,
     }
     task_store[request_id] = task
     asyncio.create_task(_run_generate_task(request.app, request_id, current_user, body))
-    return {"request_id": request_id, "status": "running"}
+    return {
+        "request_id": request_id,
+        "conversation_id": body.conversation_id,
+        "status": "running",
+        "created_at": now,
+        "expire_at": expire_at,
+    }
 
 
 @router.get("/backend-api/tasks/{request_id}")
-async def get_generate_task(request_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+async def get_generate_task(
+    request_id: str,
+    request: Request,
+    offset: int = 0,
+    include_partial: bool = True,
+    current_user: dict = Depends(get_current_user),
+):
     task_store = _task_map(request)
     task = task_store.get(request_id)
     if not task or task.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    if _is_task_expired(task):
+        return {
+            "request_id": request_id,
+            "status": "error",
+            "error_code": "TASK_EXPIRED",
+            "error_message": "task expired",
+            "retryable": False,
+        }
+
     status = task.get("status")
     if status == "running":
-        return {
+        partial = task.get("partial_text", "")
+        safe_offset = max(0, int(offset or 0))
+        delta_text = partial[safe_offset:] if safe_offset < len(partial) else ""
+        rsp = {
             "request_id": request_id,
             "status": "running",
             "offset": task.get("offset", 0),
-            "partial_text": task.get("partial_text", ""),
+            "delta_text": delta_text,
+            "updated_at": task.get("updated_at"),
         }
+        if include_partial:
+            rsp["partial_text"] = partial
+        return rsp
     if status == "done":
         return {
             "request_id": request_id,
@@ -364,12 +450,21 @@ async def get_generate_task(request_id: str, request: Request, current_user: dic
             "offset": task.get("offset", 0),
             "result_text": task.get("result_text", ""),
             "usage": None,
+            "finished_at": task.get("updated_at"),
+        }
+    if status == "cancelled":
+        return {
+            "request_id": request_id,
+            "status": "cancelled",
+            "cancelled_at": task.get("updated_at"),
         }
     return {
         "request_id": request_id,
         "status": "error",
         "error_code": task.get("error_code") or "unknown",
         "error_message": task.get("error_message") or "unknown error",
+        "retryable": True,
+        "updated_at": task.get("updated_at"),
     }
 
 
@@ -379,9 +474,56 @@ async def get_generate_task_events(request_id: str, request: Request, offset: in
     task = task_store.get(request_id)
     if not task or task.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=404, detail="Task not found")
-    delta = _task_event_text(task, offset)
-    return {"request_id": request_id, "status": task.get("status"), "offset": task.get("offset", 0), "events": [delta] if delta else []}
+    if _is_task_expired(task):
+        raise HTTPException(status_code=410, detail="Task expired")
 
+    current_offset = task.get("offset", 0)
+    safe_offset = max(0, int(offset or 0))
+    delta = _task_event_text(task, safe_offset)
+    events = []
+    if delta:
+        events.append({"type": "delta", "offset": safe_offset, "text": delta})
+    if task.get("status") == "done":
+        events.append({"type": "done", "offset": current_offset})
+    elif task.get("status") == "error":
+        events.append({
+            "type": "error",
+            "offset": current_offset,
+            "error_code": task.get("error_code") or "unknown",
+            "error_message": task.get("error_message") or "unknown error",
+        })
+
+    return {
+        "request_id": request_id,
+        "status": task.get("status"),
+        "next_offset": current_offset,
+        "events": events,
+    }
+
+
+@router.post("/backend-api/tasks/{request_id}/cancel")
+async def cancel_generate_task(request_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+    task_store = _task_map(request)
+    task = task_store.get(request_id)
+    if not task or task.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.get("status") in {"done", "error", "cancelled"}:
+        return {
+            "request_id": request_id,
+            "status": task.get("status"),
+            "cancelled_at": task.get("updated_at"),
+        }
+
+    task["status"] = "cancelled"
+    task["error_code"] = None
+    task["error_message"] = None
+    task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    return {
+        "request_id": request_id,
+        "status": "cancelled",
+        "cancelled_at": task.get("updated_at"),
+    }
 
 
 # ── Conversations ─────────────────────────────────────────────────────────────

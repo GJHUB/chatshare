@@ -703,11 +703,15 @@ async function taskGenerateResponse(body, aiWrap) {
   isStreaming = true; updateSendBtn();
   abortController = new AbortController();
   let fullText = '';
+  let bgState = 'FOREGROUND_STREAMING';
+  const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
   try {
     const createRes = await fetch('/backend-api/tasks/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({
+        request_id: requestId,
         conversation_id: currentConvId,
         content: body.content,
         model: body.model,
@@ -722,14 +726,18 @@ async function taskGenerateResponse(body, aiWrap) {
     }
 
     const task = await createRes.json();
-    const requestId = task.request_id;
+    const taskRequestId = task.request_id || requestId;
     let lastOffset = 0;
 
     while (true) {
       if (abortController.signal.aborted) throw new DOMException('aborted', 'AbortError');
       await new Promise(r => setTimeout(r, 1800));
 
-      const statusRes = await fetch(`/backend-api/tasks/${requestId}`, {
+      if (document.hidden && bgState === 'FOREGROUND_STREAMING') {
+        bgState = 'BACKGROUND_STREAMING';
+      }
+
+      const statusRes = await fetch(`/backend-api/tasks/${taskRequestId}?offset=${lastOffset}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         signal: abortController.signal
       });
@@ -740,23 +748,43 @@ async function taskGenerateResponse(body, aiWrap) {
 
       const st = await statusRes.json();
       if (st.status === 'running') {
+        if (document.hidden) bgState = 'BACKGROUND_POLLING';
+        const delta = st.delta_text || '';
         const text = st.partial_text || '';
-        const offset = Number(st.offset || text.length || 0);
-        if (offset >= lastOffset && text.length >= fullText.length) {
-          fullText = text;
-          setMsgContent(aiWrap, fullText || '正在思考...', true);
+        const offset = Number(st.offset || (text.length || fullText.length));
+
+        if (delta && offset >= lastOffset) {
+          fullText += delta;
           lastOffset = offset;
+        } else if (text && text.length >= fullText.length) {
+          fullText = text;
+          lastOffset = offset;
+        }
+
+        if (fullText) {
+          setMsgContent(aiWrap, fullText, true);
+        } else if (bgState === 'BACKGROUND_POLLING') {
+          setMsgContent(aiWrap, '已切换后台保活，正在继续生成...', true);
+        } else {
+          setMsgContent(aiWrap, '正在思考...', true);
         }
         continue;
       }
 
       if (st.status === 'done') {
+        bgState = 'DONE';
         fullText = st.result_text || fullText;
         setMsgContent(aiWrap, fullText || '（已完成，暂无内容）', false);
         ok = true;
         break;
       }
 
+      if (st.status === 'cancelled') {
+        setMsgContent(aiWrap, '⏹️ 已停止生成', false);
+        return;
+      }
+
+      bgState = 'ERROR';
       setMsgContent(aiWrap, `❌ ${st.error_message || '生成失败'}`, false);
       return;
     }
