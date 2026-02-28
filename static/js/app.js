@@ -282,7 +282,10 @@ async function loadConversation(convId) {
   currentMessages = msgs;
   const el = document.getElementById('messages');
   el.innerHTML = '';
-  for (const m of msgs) appendMessage(m.role, m.content, false, m.seq, m.model);
+  for (const m of msgs) {
+    const atts = normalizeMessageAttachments(m);
+    appendMessage(m.role, m.content, false, m.seq, m.model, atts.length ? atts : null);
+  }
   pendingAttachmentRefs = getConversationAttachmentRefs(convId).slice();
   renderFilePreview();
   scrollToBottom(true);
@@ -969,6 +972,36 @@ function retryWithModel(seq) {
 }
 
 // ── Message rendering ──────────────────────────────────────────────────────
+function normalizeMessageAttachments(message) {
+  const raw = message?.attachments
+    || message?.metadata?.attachments
+    || message?.content?.attachments
+    || [];
+  if (!Array.isArray(raw)) return [];
+
+  return raw.map(a => {
+    const name = a.name || a.filename || '未命名文件';
+    let mime = a.mime_type || a.content_type || '';
+    const size = Number(a.size_bytes ?? a.size ?? 0) || 0;
+    const preview = a.preview_url || a.thumbnail_url || a.url || null;
+
+    if (!mime && typeof name === 'string' && name.includes('.')) {
+      const ext = name.split('.').pop().toLowerCase();
+      if (['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) mime = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+      else if (ext === 'pdf') mime = 'application/pdf';
+      else mime = 'application/octet-stream';
+    }
+
+    return {
+      id: a.id || a.file_id || '',
+      name,
+      mime_type: mime || 'application/octet-stream',
+      size_bytes: size,
+      preview_url: preview,
+    };
+  });
+}
+
 function renderAttachmentPreviewHtml(attachments) {
   if (!attachments || attachments.length === 0) return '';
   let html = '<div class="msg-attachments">';

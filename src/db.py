@@ -46,6 +46,13 @@ async def ensure_schema():
             """
         )
 
+        await conn.execute(
+            """
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS attachments JSONB
+            """
+        )
+
 
 async def close_pool():
     global _pool

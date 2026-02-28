@@ -492,12 +492,12 @@ async def list_messages(conv_id: int, limit: int = 50, include_replaced: bool = 
             raise HTTPException(status_code=404, detail="Conversation not found")
         if include_replaced:
             rows = await conn.fetch(
-                "SELECT id,seq,role,content,model,replaced,created_at FROM chat_messages WHERE conversation_id=$1 ORDER BY created_at ASC LIMIT $2",
+                "SELECT id,seq,role,content,model,replaced,created_at,attachments FROM chat_messages WHERE conversation_id=$1 ORDER BY created_at ASC LIMIT $2",
                 conv_id, limit,
             )
         else:
             rows = await conn.fetch(
-                "SELECT id,seq,role,content,model,replaced,created_at FROM chat_messages WHERE conversation_id=$1 AND (replaced IS NULL OR replaced=false) ORDER BY created_at ASC LIMIT $2",
+                "SELECT id,seq,role,content,model,replaced,created_at,attachments FROM chat_messages WHERE conversation_id=$1 AND (replaced IS NULL OR replaced=false) ORDER BY created_at ASC LIMIT $2",
                 conv_id, limit,
             )
     return [dict(r) for r in rows]
@@ -987,8 +987,8 @@ async def send_message(conv_id: int, body: MessageCreate, request: Request, curr
         # Save user message
         next_seq = await _get_next_seq(conn, conv_id)
         await conn.execute(
-            "INSERT INTO chat_messages (conversation_id,role,content,seq,replaced) VALUES ($1,'user',$2,$3,false)",
-            conv_id, body.content, next_seq,
+            "INSERT INTO chat_messages (conversation_id,role,content,seq,replaced,attachments) VALUES ($1,'user',$2,$3,false,$4)",
+            conv_id, body.content, next_seq, json.dumps(body.attachments or []),
         )
 
         # Load active history
@@ -1015,6 +1015,7 @@ async def send_message(conv_id: int, body: MessageCreate, request: Request, curr
     # MinIO: save user message
     minio_msg = {
         "seq": next_seq, "role": "user", "content": body.content,
+        "attachments": body.attachments or [],
         "timestamp": datetime.utcnow().isoformat() + "Z", "replaced": False,
     }
     await _save_to_minio(current_user["id"], current_user["username"], conv_id, minio_msg)
