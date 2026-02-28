@@ -824,7 +824,7 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
     else:
         # GPT / sass / grok / deepseek
         parser = SSEParser(model, chunk_id)
-        max_retries = 2
+        max_retries = 3
         current_session = session
         success = False
         sent_any_chunk = False
@@ -908,8 +908,14 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                 logger.error(f"Stream error (attempt {attempt+1}): {e}")
                 if attempt < max_retries - 1:
                     continue
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                yield "data: [DONE]\n\n"
+                if parser.full_text:
+                    # If we already received partial content, end gracefully instead of hard error.
+                    finish = _make_chunk(chunk_id, model, finish_reason="stop")
+                    yield f"data: {json.dumps(finish)}\n\n"
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield "data: [DONE]\n\n"
         if not success and not parser.full_text:
             pass  # error already yielded
 
