@@ -966,18 +966,43 @@ function renderMd(text) {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-function copyMsg(btn) {
-  const text = btn.closest('.msg-wrap').querySelector('.msg-content').innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = '✅'; setTimeout(() => btn.textContent = '📋', 2000);
-  });
+async function copyWithFallback(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {}
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
 }
 
-function copyCode(btn) {
+async function copyMsg(btn) {
+  const text = btn.closest('.msg-wrap').querySelector('.msg-content').innerText;
+  const ok = await copyWithFallback(text);
+  btn.textContent = ok ? '✅' : '❌';
+  setTimeout(() => btn.textContent = '📋', 2000);
+}
+
+async function copyCode(btn) {
   const code = btn.closest('.code-block-wrap').querySelector('code').innerText;
-  navigator.clipboard.writeText(code).then(() => {
-    btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 2000);
-  });
+  const ok = await copyWithFallback(code);
+  btn.textContent = ok ? '已复制' : '复制失败';
+  setTimeout(() => btn.textContent = '复制', 2000);
 }
 
 function logout() {

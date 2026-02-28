@@ -661,6 +661,17 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
             upstream_attachments.append(dict(item))
     channel, chatshare_model = resolve_model(model)
     is_media_gen_model = model in MEDIA_GEN_MODELS or chatshare_model in MEDIA_GEN_MODELS
+
+    # Claude native completion path currently does not carry uploaded file attachments.
+    # When user uploads files with a Claude model, force sass multimodal path.
+    if upstream_attachments and channel == "claude":
+        logger.info("Claude model with attachments detected; switching to sass multimodal path")
+        channel = "sass"
+        if "code" in (model or "").lower() or "编程" in (model or ""):
+            chatshare_model = "Claude-opus-4-6（编程版）"
+        else:
+            chatshare_model = "Claude code（通用版）"
+
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     # Acquire session
