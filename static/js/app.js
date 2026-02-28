@@ -1070,15 +1070,44 @@ function appendMessage(role, content, streaming, seq, model, attachments = null)
   return wrap;
 }
 
+function captureCodeBlockStates(container) {
+  const states = [];
+  container.querySelectorAll('.code-block-wrap.long pre').forEach((pre, idx) => {
+    states.push({
+      idx,
+      scrollTop: pre.scrollTop,
+      scrollLeft: pre.scrollLeft,
+      height: pre.style.height || ''
+    });
+  });
+  return states;
+}
+
+function restoreCodeBlockStates(container, states) {
+  if (!states || states.length === 0) return;
+  const blocks = container.querySelectorAll('.code-block-wrap.long pre');
+  states.forEach(s => {
+    const pre = blocks[s.idx];
+    if (!pre) return;
+    if (s.height) pre.style.height = s.height;
+    pre.scrollTop = s.scrollTop;
+    pre.scrollLeft = s.scrollLeft;
+  });
+}
+
 function setMsgContent(wrap, text, streaming) {
   const c = wrap.querySelector('.msg-content');
   const a = wrap.querySelector('.msg-actions');
+  const codeStates = captureCodeBlockStates(c);
+
   if (streaming) {
     c.innerHTML = renderMd(text) + '<span class="cursor">▋</span>';
   } else {
     c.innerHTML = renderMd(text);
     if (a) a.style.removeProperty('display');
   }
+
+  restoreCodeBlockStates(c, codeStates);
   scrollToBottom();
 }
 
