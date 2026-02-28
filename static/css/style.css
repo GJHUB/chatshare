@@ -459,3 +459,31 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 @media (max-width:768px){
   .brand-chip{display:none}
 }
+
+/* v2.0.2 chips + long code block behavior */
+:root, [data-theme="light"] {
+  --chip-bg:#f6f7fb;
+  --chip-border:#e3e7ef;
+  --chip-text:#334155;
+}
+[data-theme="dark"] {
+  --chip-bg:#2a3140;
+  --chip-border:#3a4356;
+  --chip-text:#d6dce7;
+}
+.msg-assistant .msg-content code{
+  background:var(--chip-bg)!important;
+  border:1px solid var(--chip-border)!important;
+  color:var(--chip-text)!important;
+  border-radius:8px;
+  padding:2px 8px;
+}
+.code-block-wrap.long pre{
+  max-height:420px;
+  overflow:auto;
+  resize:vertical;
+  min-height:240px;
+}
+@media (max-width:768px){
+  .code-block-wrap.long pre{max-height:280px;min-height:180px}
+}

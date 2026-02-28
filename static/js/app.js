@@ -29,7 +29,9 @@ renderer.code = function(code, lang) {
   let highlighted;
   try { highlighted = hljs.highlight(code, { language }).value; }
   catch(e) { highlighted = escapeHtml(code); }
-  return `<div class="code-block-wrap">
+  const lines = String(code || '').split('\n').length;
+  const longClass = lines >= 12 ? ' long' : '';
+  return `<div class="code-block-wrap${longClass}">
     <div class="code-header">
       <span>${language}</span>
       <button class="copy-code-btn" onclick="copyCode(this)">复制</button>

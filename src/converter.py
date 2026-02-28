@@ -284,7 +284,7 @@ def openai_to_backend_sass(messages: list[dict], model: str, conversation_id: st
             if has_image:
                 message["content"] = {
                     "content_type": "multimodal_text",
-                    "parts": image_parts + [""],
+                    "parts": image_parts + [final_content or "请结合附件分析"],
                 }
 
     backend_messages = [message]
