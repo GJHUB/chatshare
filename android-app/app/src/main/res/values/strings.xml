@@ -3,4 +3,8 @@
     <string name="app_name">咕嘟</string>
     <string name="app_subtitle">AI 智能对话平台</string>
     <string name="loading">加载中...</string>
+    <string name="notify_title">咕嘟后台保活中</string>
+    <string name="notify_generating">咕嘟正在生成回答...</string>
+    <string name="notify_channel_name">咕嘟后台生成</string>
+    <string name="notify_channel_desc">保持生成任务在后台继续运行</string>
 </resources>

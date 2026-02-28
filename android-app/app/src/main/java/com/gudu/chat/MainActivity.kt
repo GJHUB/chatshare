@@ -9,9 +9,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.core.content.FileProvider
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
+import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -24,6 +24,8 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.gudu.chat.databinding.ActivityMainBinding
 import java.io.File
@@ -34,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private var uploadCallback: ValueCallback<Array<Uri>>? = null
     private var cameraImageUri: Uri? = null
     private var lastBackPress = 0L
+    private var isGenerating = false
+    private var isInBackground = false
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -75,6 +79,20 @@ class MainActivity : AppCompatActivity() {
         binding.webView.loadUrl(HOME_URL)
     }
 
+    override fun onStart() {
+        super.onStart()
+        isInBackground = false
+        stopKeepAliveService()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isInBackground = true
+        if (isGenerating) {
+            startKeepAliveService(getString(R.string.notify_generating))
+        }
+    }
+
     private fun setupRetry() {
         binding.btnRetry.setOnClickListener {
             binding.errorLayout.visibility = android.view.View.GONE
@@ -83,7 +101,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
     private fun setupWebView() {
         with(binding.webView.settings) {
             javaScriptEnabled = true
@@ -99,6 +117,8 @@ class MainActivity : AppCompatActivity() {
             databaseEnabled = true
         }
 
+        binding.webView.addJavascriptInterface(GenerateBridge(), "GuDuNative")
+
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(binding.webView, true)
@@ -110,6 +130,11 @@ class MainActivity : AppCompatActivity() {
                 super.onPageStarted(view, url, favicon)
                 binding.errorLayout.visibility = android.view.View.GONE
                 binding.webView.visibility = android.view.View.VISIBLE
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                injectGenerateObserver()
             }
 
             override fun onReceivedError(
@@ -180,6 +205,55 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun injectGenerateObserver() {
+        val js = """
+            (function() {
+              if (window.__gudu_bg_installed) return;
+              window.__gudu_bg_installed = true;
+
+              function report() {
+                try {
+                  var thinking = !!document.querySelector('.thinking');
+                  var sending = !!document.querySelector('#send-btn.stop');
+                  var active = !!(thinking || sending);
+                  if (window.GuDuNative && window.GuDuNative.onGenerationState) {
+                    window.GuDuNative.onGenerationState(active);
+                  }
+                } catch (e) {}
+              }
+
+              var obs = new MutationObserver(function() { report(); });
+              obs.observe(document.body, { childList: true, subtree: true, attributes: true });
+              report();
+              setInterval(report, 2000);
+            })();
+        """.trimIndent()
+        binding.webView.evaluateJavascript(js, null)
+    }
+
+    private inner class GenerateBridge {
+        @JavascriptInterface
+        fun onGenerationState(active: Boolean) {
+            runOnUiThread {
+                isGenerating = active
+                if (isInBackground && active) {
+                    startKeepAliveService(getString(R.string.notify_generating))
+                }
+                if (!active) {
+                    stopKeepAliveService()
+                }
+            }
+        }
+    }
+
+    private fun startKeepAliveService(text: String) {
+        val intent = ForegroundKeepAliveService.startIntent(this, text)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun stopKeepAliveService() {
+        startService(ForegroundKeepAliveService.stopIntent(this))
+    }
 
     private fun createImageUri(): Uri? {
         return try {
