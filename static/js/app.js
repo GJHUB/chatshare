@@ -558,10 +558,6 @@ async function sendMessage() {
     }
   }
 
-  if (isImageVideoModel(currentModel) && currentConvId) {
-    await newConversation();
-  }
-
   if (!currentConvId) {
     const res = await api('POST', '/api/conversations', { model: currentModel });
     if (!res || !res.ok) return;
@@ -591,7 +587,6 @@ async function sendMessage() {
       width: Number(a.width) || 0,
       height: Number(a.height) || 0,
     }));
-    body.force_new_chatshare_context = true;
   }
 
   if (APP_TASK_MODE) await taskGenerateResponse(body, aiWrap);
