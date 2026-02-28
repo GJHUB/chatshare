@@ -491,7 +491,7 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 /* mini-map navigation */
 .minimap-toggle{margin-left:auto;background:var(--bg-primary);border:1px solid var(--border-default);border-radius:10px;padding:6px 10px;cursor:pointer;min-width:72px}
 .minimap-toggle:hover{background:var(--brand-light);border-color:var(--brand)}
-.minimap{position:fixed;right:14px;top:110px;bottom:130px;width:56px;border:1px solid var(--border-default);background:var(--bg-card);border-radius:10px;z-index:140;overflow:hidden}
+.minimap{position:fixed;right:14px;top:110px;bottom:130px;width:56px;border:1px solid var(--border-default);background:var(--bg-card);border-radius:10px;z-index:9999;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.18)}
 .minimap.hidden{display:none}
 .minimap-track{position:absolute;inset:8px;background:transparent}
 .minimap-item{position:absolute;left:0;right:0;border-radius:2px;opacity:.9}

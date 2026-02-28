@@ -1275,17 +1275,17 @@ function initMobileSidebarGesture() {
 
 function updateMiniMapToggleState() {
   const btn = document.getElementById('minimap-toggle');
-  if (!btn) return;
-  btn.textContent = miniMapEnabled ? '🗺️ 已开' : '🗺️';
+  const map = document.getElementById('minimap');
+  if (btn) btn.textContent = miniMapEnabled ? '🗺️ 已开' : '🗺️';
+  if (map) map.classList.toggle('hidden', !miniMapEnabled);
 }
 
 function toggleMiniMap() {
   miniMapEnabled = !miniMapEnabled;
   localStorage.setItem('miniMapEnabled', miniMapEnabled ? '1' : '0');
   const map = document.getElementById('minimap');
-  map.classList.toggle('hidden', !miniMapEnabled);
-  if (miniMapEnabled) rebuildMiniMap();
   updateMiniMapToggleState();
+  if (miniMapEnabled) rebuildMiniMap();
 }
 
 function rebuildMiniMap() {
@@ -1321,7 +1321,6 @@ function initMiniMap() {
   const messages = document.getElementById('messages');
   if (!map || !track || !messages) return;
 
-  map.classList.toggle('hidden', !miniMapEnabled);
   updateMiniMapToggleState();
 
   const jump = (clientY) => {
@@ -1342,6 +1341,19 @@ function initMiniMap() {
 
   const obs = new MutationObserver(() => { if (miniMapEnabled) rebuildMiniMap(); });
   obs.observe(messages, { childList: true, subtree: true });
+
+  window.addEventListener('resize', () => {
+    const saved = localStorage.getItem('miniMapEnabled');
+    if (saved === null) {
+      miniMapEnabled = window.innerWidth > 768;
+      updateMiniMapToggleState();
+    }
+    if (miniMapEnabled) rebuildMiniMap();
+  });
+
+  setInterval(() => {
+    if (miniMapEnabled) rebuildMiniMap();
+  }, 1200);
 
   if (miniMapEnabled) rebuildMiniMap();
 }
