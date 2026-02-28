@@ -13,7 +13,7 @@ from .state import auth, dispatcher, usage_tracker
 from .converter import resolve_model, openai_to_backend, build_non_stream_response, MODEL_MAP, SSEParser
 from .config import API_KEYS, ADMIN_KEY
 from .db import get_pool, close_pool, ensure_schema
-from .web_routes import router as web_router
+from .web_routes import router as web_router, _do_stream
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +30,23 @@ app.include_router(web_router)
 
 # --- 依赖 ---
 
-async def verify_api_key(request: Request) -> str:
+async def verify_api_key(request: Request) -> dict:
     auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        key = auth_header[7:]
-    else:
-        key = auth_header
-    if key not in API_KEYS:
+    key = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
+    key = (key or "").strip()
+    if not key:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return key
+
+    if key in API_KEYS:
+        return {"api_key": key, "user_id": None, "username": "system"}
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id, username FROM chat_users WHERE api_key=$1", key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return {"api_key": key, "user_id": user["id"], "username": user["username"]}
 
 
 async def verify_admin(request: Request) -> str:
@@ -61,6 +69,20 @@ class ChatRequest(BaseModel):
     stream: bool = True
     temperature: float | None = None
     max_tokens: int | None = None
+
+
+class NativeMessagePayload(BaseModel):
+    role: str = "user"
+    content: str
+    attachments: list[dict] = []
+
+
+class NativeConversationRequest(BaseModel):
+    request_id: str | None = None
+    model: str = "gpt-4o"
+    message: NativeMessagePayload
+    stream: bool = True
+    response_mode: str = "blocking"
 
 
 # --- 流式响应 ---
@@ -118,6 +140,31 @@ async def non_stream_response(car_session, backend_request: dict, model: str) ->
     return build_non_stream_response(chunk_id, model, parser.full_text)
 
 
+async def _collect_native_stream_text(gen):
+    full_text = ""
+    error = None
+    async for chunk in gen:
+        if not isinstance(chunk, str) or not chunk.startswith("data: "):
+            continue
+        raw = chunk[6:].strip()
+        if raw == "[DONE]":
+            continue
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(obj, dict) and obj.get("error"):
+            error = str(obj.get("error"))
+            break
+        choices = (obj.get("choices") or []) if isinstance(obj, dict) else []
+        if choices:
+            delta = (choices[0].get("delta") or {})
+            piece = delta.get("content")
+            if piece:
+                full_text += piece
+    return full_text, error
+
+
 # --- 页面路由 ---
 
 @app.get("/")
@@ -132,7 +179,8 @@ async def login_page():
 # --- API 路由 ---
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatRequest, api_key: str = Depends(verify_api_key)):
+async def chat_completions(request: ChatRequest, api_ctx: dict = Depends(verify_api_key)):
+    api_key = api_ctx["api_key"]
     if not usage_tracker.check_rate_limit(api_key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
@@ -165,15 +213,104 @@ async def chat_completions(request: ChatRequest, api_key: str = Depends(verify_a
         return JSONResponse(content=result)
 
 
-@app.get("/v1/models")
-async def list_models(api_key: str = Depends(verify_api_key)):
+@app.post("/v1/conversations/{conversation_id}/messages")
+async def native_conversation_message(
+    conversation_id: int,
+    body: NativeConversationRequest,
+    request: Request,
+    api_ctx: dict = Depends(verify_api_key),
+):
+    req_id = body.request_id or request.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex[:12]}"
+    user_id = api_ctx.get("user_id")
+    username = api_ctx.get("username")
+    if not user_id:
+        raise HTTPException(status_code=403, detail="This API key cannot access native conversation endpoints")
+
+    pool = await get_pool()
+    dispatcher = request.app.state.dispatcher
+
+    async with pool.acquire() as conn:
+        conv = await conn.fetchrow(
+            "SELECT id, chatshare_conv_id, last_message_id FROM chat_conversations WHERE id=$1 AND user_id=$2",
+            conversation_id,
+            user_id,
+        )
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        chatshare_conv_id = conv["chatshare_conv_id"]
+        last_msg_id = conv["last_message_id"]
+
+        next_seq = await conn.fetchval(
+            "SELECT COALESCE(MAX(seq),0)+1 FROM chat_messages WHERE conversation_id=$1", conversation_id
+        )
+        await conn.execute(
+            "INSERT INTO chat_messages (conversation_id,role,content,seq,replaced,attachments) VALUES ($1,'user',$2,$3,false,$4)",
+            conversation_id,
+            body.message.content,
+            next_seq,
+            json.dumps(body.message.attachments or []),
+        )
+
+        history = await conn.fetch(
+            "SELECT role,content FROM chat_messages WHERE conversation_id=$1 AND (replaced IS NULL OR replaced=false) ORDER BY created_at ASC",
+            conversation_id,
+        )
+
+        await conn.execute("UPDATE chat_conversations SET model=$1, updated_at=NOW() WHERE id=$2", body.model, conversation_id)
+
+    messages = [{"role": "user", "content": body.message.content}] if chatshare_conv_id else [
+        {"role": r["role"], "content": r["content"]} for r in history
+    ]
+
+    gen = _do_stream(
+        request,
+        dispatcher,
+        conversation_id,
+        messages,
+        body.model,
+        user_id,
+        username,
+        chatshare_conv_id=chatshare_conv_id,
+        last_message_id=last_msg_id,
+        attachments=body.message.attachments or None,
+    )
+
+    if body.stream:
+        return StreamingResponse(
+            gen,
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Request-Id": req_id},
+        )
+
+    text, err = await _collect_native_stream_text(gen)
+    if err:
+        return JSONResponse(status_code=502, content={
+            "request_id": req_id,
+            "error": {"code": "UPSTREAM_ERROR", "message": err, "retryable": True},
+        })
+
     return {
-        "object": "list",
-        "data": [
-            {"id": model, "object": "model", "owned_by": "chatshare"}
-            for model in MODEL_MAP.keys()
-        ],
+        "request_id": req_id,
+        "data": {
+            "conversation_id": conversation_id,
+            "message": {"role": "assistant", "content": text},
+        },
     }
+
+
+@app.get("/v1/models")
+async def list_models(api_ctx: dict = Depends(verify_api_key)):
+    req_id = f"req_{uuid.uuid4().hex[:12]}"
+    models = []
+    for model, mapped in MODEL_MAP.items():
+        mtype = "chat"
+        if model in {"4o-image", "Nano-banana", "Nano-banana-Pro", "即梦-4.0画图模型", "即梦-4.1画图模型", "即梦-4.5画图模型"}:
+            mtype = "image"
+        if model in {"Veo_3_1", "即梦3.0视频模型"}:
+            mtype = "video"
+        models.append({"id": model, "type": mtype, "status": "active", "provider_model": mapped})
+    return {"request_id": req_id, "data": models}
 
 
 @app.get("/admin/status")
