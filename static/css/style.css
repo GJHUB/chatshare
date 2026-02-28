@@ -439,3 +439,22 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 @media (max-width: 768px){
   .scroll-to-bottom-btn{right:12px;bottom:108px;font-size:12px;padding:8px 12px}
 }
+
+/* v2.0 extra polish */
+*{transition:background-color .3s,color .3s,border-color .3s}
+.model-bar{display:flex;align-items:center;gap:10px}
+.brand-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--border-default);
+  background:var(--bg-primary);
+  color:var(--text-primary);
+  font-size:13px;
+  line-height:1;
+}
+@media (max-width:768px){
+  .brand-chip{display:none}
+}
