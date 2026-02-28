@@ -105,8 +105,19 @@ function isImageVideoModel(id) {
 
 function initTheme() {
   const theme = localStorage.getItem('theme') || 'light';
+  const preset = localStorage.getItem('theme_preset') || 'forest';
   document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-preset', preset);
+  const sel = document.getElementById('preset-select');
+  if (sel) sel.value = preset;
   updateThemeIcon(theme);
+}
+
+function changePreset(preset) {
+  const next = preset || 'forest';
+  document.documentElement.setAttribute('data-preset', next);
+  localStorage.setItem('theme_preset', next);
+  if (miniMapEnabled) scheduleMiniMapRebuild();
 }
 
 function toggleTheme() {
@@ -1055,7 +1066,7 @@ function appendMessage(role, content, streaming, seq, model, attachments = null)
       </div>`;
   }
   el.appendChild(wrap);
-  if (miniMapEnabled) requestAnimationFrame(rebuildMiniMap);
+  if (miniMapEnabled) scheduleMiniMapRebuild();
   return wrap;
 }
 
@@ -1155,7 +1166,7 @@ function scrollToBottom(force = false) {
     isAutoFollow = true;
     hasUnreadDelta = false;
     updateUnreadIndicator();
-    if (miniMapEnabled) rebuildMiniMap();
+    if (miniMapEnabled) scheduleMiniMapRebuild();
   });
 }
 
@@ -1288,6 +1299,17 @@ function toggleMiniMap() {
   if (miniMapEnabled) rebuildMiniMap();
 }
 
+let miniMapRaf = 0;
+
+function scheduleMiniMapRebuild() {
+  if (!miniMapEnabled) return;
+  if (miniMapRaf) return;
+  miniMapRaf = requestAnimationFrame(() => {
+    miniMapRaf = 0;
+    rebuildMiniMap();
+  });
+}
+
 function rebuildMiniMap() {
   const map = document.getElementById('minimap');
   const track = document.getElementById('minimap-track');
@@ -1299,7 +1321,9 @@ function rebuildMiniMap() {
   track.innerHTML = '';
   const total = Math.max(messages.scrollHeight, 1);
   const h = track.clientHeight || 1;
-  document.querySelectorAll('.msg-wrap').forEach(w => {
+  const wraps = Array.from(document.querySelectorAll('.msg-wrap'));
+  const sampled = wraps.length > 300 ? wraps.filter((_, i) => i % Math.ceil(wraps.length / 240) === 0) : wraps;
+  sampled.forEach(w => {
     const top = w.offsetTop;
     const hh = Math.max(w.offsetHeight, 8);
     const item = document.createElement('div');
@@ -1313,6 +1337,7 @@ function rebuildMiniMap() {
   const vpH = Math.max((messages.clientHeight / total) * h, 18);
   viewport.style.top = vpTop + 'px';
   viewport.style.height = vpH + 'px';
+  viewport.style.cursor = 'grab';
 }
 
 function initMiniMap() {
@@ -1323,23 +1348,52 @@ function initMiniMap() {
 
   updateMiniMapToggleState();
 
+  const viewport = document.getElementById('minimap-viewport');
   const jump = (clientY) => {
     const rect = track.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / Math.max(rect.height, 1)));
-    messages.scrollTop = ratio * messages.scrollHeight;
+    messages.scrollTop = ratio * (messages.scrollHeight - messages.clientHeight);
   };
 
   track.addEventListener('click', e => jump(e.clientY));
-  let dragging = false;
-  track.addEventListener('mousedown', e => { dragging = true; jump(e.clientY); });
-  document.addEventListener('mousemove', e => { if (dragging) jump(e.clientY); });
-  document.addEventListener('mouseup', () => { dragging = false; });
 
-  messages.addEventListener('scroll', () => {
-    if (miniMapEnabled) rebuildMiniMap();
+  let trackDragging = false;
+  track.addEventListener('mousedown', e => {
+    if (e.target === viewport) return;
+    trackDragging = true;
+    jump(e.clientY);
   });
 
-  const obs = new MutationObserver(() => { if (miniMapEnabled) rebuildMiniMap(); });
+  let viewportDragging = false;
+  let viewportOffset = 0;
+  viewport?.addEventListener('mousedown', e => {
+    viewportDragging = true;
+    viewportOffset = e.clientY - viewport.getBoundingClientRect().top;
+    viewport.style.cursor = 'grabbing';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (trackDragging) jump(e.clientY);
+    if (!viewportDragging) return;
+    const rect = track.getBoundingClientRect();
+    const y = e.clientY - viewportOffset;
+    const ratio = Math.min(1, Math.max(0, (y - rect.top) / Math.max(rect.height, 1)));
+    messages.scrollTop = ratio * (messages.scrollHeight - messages.clientHeight);
+  });
+
+  document.addEventListener('mouseup', () => {
+    trackDragging = false;
+    viewportDragging = false;
+    if (viewport) viewport.style.cursor = 'grab';
+  });
+
+  messages.addEventListener('scroll', () => {
+    if (miniMapEnabled) scheduleMiniMapRebuild();
+  });
+
+  const obs = new MutationObserver(() => { if (miniMapEnabled) scheduleMiniMapRebuild(); });
   obs.observe(messages, { childList: true, subtree: true });
 
   window.addEventListener('resize', () => {
@@ -1348,11 +1402,11 @@ function initMiniMap() {
       miniMapEnabled = window.innerWidth > 768;
       updateMiniMapToggleState();
     }
-    if (miniMapEnabled) rebuildMiniMap();
+    if (miniMapEnabled) scheduleMiniMapRebuild();
   });
 
   setInterval(() => {
-    if (miniMapEnabled) rebuildMiniMap();
+    if (miniMapEnabled) scheduleMiniMapRebuild();
   }, 1200);
 
   if (miniMapEnabled) rebuildMiniMap();
