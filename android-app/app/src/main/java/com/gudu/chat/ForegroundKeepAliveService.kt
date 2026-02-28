@@ -20,6 +20,14 @@ class ForegroundKeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_COMPLETE -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: getString(R.string.notify_done)
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(NOTIFY_DONE_ID, buildCompletionNotification(text))
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -49,8 +57,8 @@ class ForegroundKeepAliveService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(text: String): Notification {
-        val contentIntent = PendingIntent.getActivity(
+    private fun buildMainPendingIntent(): PendingIntent {
+        return PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).apply {
@@ -58,23 +66,38 @@ class ForegroundKeepAliveService : Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
 
+    private fun buildNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(getString(R.string.notify_title))
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setContentIntent(contentIntent)
+            .setContentIntent(buildMainPendingIntent())
+            .build()
+    }
+
+    private fun buildCompletionNotification(text: String): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setContentTitle(getString(R.string.notify_done_title))
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(buildMainPendingIntent())
             .build()
     }
 
     companion object {
         const val ACTION_START = "com.gudu.chat.action.KEEP_ALIVE_START"
         const val ACTION_STOP = "com.gudu.chat.action.KEEP_ALIVE_STOP"
+        const val ACTION_COMPLETE = "com.gudu.chat.action.KEEP_ALIVE_COMPLETE"
         const val EXTRA_TEXT = "extra_text"
         private const val CHANNEL_ID = "gudu_background_generate"
         private const val NOTIFY_ID = 10001
+        private const val NOTIFY_DONE_ID = 10002
 
         fun startIntent(context: Context, text: String): Intent {
             return Intent(context, ForegroundKeepAliveService::class.java).apply {
@@ -86,6 +109,13 @@ class ForegroundKeepAliveService : Service() {
         fun stopIntent(context: Context): Intent {
             return Intent(context, ForegroundKeepAliveService::class.java).apply {
                 action = ACTION_STOP
+            }
+        }
+
+        fun completeIntent(context: Context, text: String): Intent {
+            return Intent(context, ForegroundKeepAliveService::class.java).apply {
+                action = ACTION_COMPLETE
+                putExtra(EXTRA_TEXT, text)
             }
         }
     }

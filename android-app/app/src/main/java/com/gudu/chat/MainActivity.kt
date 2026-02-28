@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private var lastBackPress = 0L
     private var isGenerating = false
     private var isInBackground = false
+    private var wasGeneratingInBackground = false
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -82,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         isInBackground = false
+        wasGeneratingInBackground = false
         stopKeepAliveService()
     }
 
@@ -237,10 +239,16 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 isGenerating = active
                 if (isInBackground && active) {
+                    wasGeneratingInBackground = true
                     startKeepAliveService(getString(R.string.notify_generating))
                 }
                 if (!active) {
-                    stopKeepAliveService()
+                    if (wasGeneratingInBackground) {
+                        completeKeepAliveService(getString(R.string.notify_done))
+                        wasGeneratingInBackground = false
+                    } else {
+                        stopKeepAliveService()
+                    }
                 }
             }
         }
@@ -253,6 +261,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopKeepAliveService() {
         startService(ForegroundKeepAliveService.stopIntent(this))
+    }
+
+    private fun completeKeepAliveService(text: String) {
+        startService(ForegroundKeepAliveService.completeIntent(this, text))
     }
 
     private fun createImageUri(): Uri? {
