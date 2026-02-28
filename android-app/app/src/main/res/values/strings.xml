@@ -7,6 +7,8 @@
     <string name="notify_done_title">咕嘟生成完成</string>
     <string name="notify_generating">咕嘟正在生成回答...</string>
     <string name="notify_done">咕嘟已生成完成，点此查看</string>
+    <string name="notify_error">咕嘟连接中断，已保存进度，点此重试</string>
+    <string name="notify_restored">连接已恢复，继续同步中</string>
     <string name="notify_channel_name">咕嘟后台生成</string>
     <string name="notify_channel_desc">保持生成任务在后台继续运行</string>
 </resources>

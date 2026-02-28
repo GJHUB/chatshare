@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
@@ -39,6 +40,15 @@ class MainActivity : AppCompatActivity() {
     private var isGenerating = false
     private var isInBackground = false
     private var wasGeneratingInBackground = false
+    private lateinit var taskPrefs: SharedPreferences
+
+    private data class TaskSnapshot(
+        val requestId: String = "",
+        val conversationId: String = "",
+        val state: String = "IDLE",
+        val offset: Int = 0,
+        val updatedAt: Long = 0L,
+    )
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -73,6 +83,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        taskPrefs = getSharedPreferences("gudu_task_cache", Context.MODE_PRIVATE)
+
         setupWebView()
         setupRetry()
         setupBackPress()
@@ -83,14 +95,21 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         isInBackground = false
-        wasGeneratingInBackground = false
         stopKeepAliveService()
+
+        val snap = readTaskSnapshot()
+        wasGeneratingInBackground = snap.state == "BACKGROUND_STREAMING" || snap.state == "BACKGROUND_POLLING"
+        if (wasGeneratingInBackground) {
+            Toast.makeText(this, getString(R.string.notify_restored), Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onStop() {
         super.onStop()
         isInBackground = true
-        if (isGenerating) {
+        val snap = readTaskSnapshot()
+        val running = isGenerating || snap.state == "FOREGROUND_STREAMING" || snap.state == "BACKGROUND_STREAMING" || snap.state == "BACKGROUND_POLLING"
+        if (running) {
             startKeepAliveService(getString(R.string.notify_generating))
         }
     }
@@ -207,6 +226,30 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun readTaskSnapshot(): TaskSnapshot {
+        return TaskSnapshot(
+            requestId = taskPrefs.getString("request_id", "") ?: "",
+            conversationId = taskPrefs.getString("conversation_id", "") ?: "",
+            state = taskPrefs.getString("state", "IDLE") ?: "IDLE",
+            offset = taskPrefs.getInt("offset", 0),
+            updatedAt = taskPrefs.getLong("updated_at", 0L),
+        )
+    }
+
+    private fun saveTaskSnapshot(state: String, requestId: String, conversationId: String, offset: Int) {
+        taskPrefs.edit()
+            .putString("state", state)
+            .putString("request_id", requestId)
+            .putString("conversation_id", conversationId)
+            .putInt("offset", offset)
+            .putLong("updated_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun clearTaskSnapshot() {
+        taskPrefs.edit().clear().apply()
+    }
+
     private fun injectGenerateObserver() {
         val js = """
             (function() {
@@ -252,6 +295,47 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        @JavascriptInterface
+        fun onTaskState(state: String, requestId: String, conversationId: String, offset: Int) {
+            runOnUiThread {
+                saveTaskSnapshot(state, requestId, conversationId, offset)
+                when (state) {
+                    "FOREGROUND_STREAMING" -> {
+                        isGenerating = true
+                    }
+                    "BACKGROUND_STREAMING", "BACKGROUND_POLLING" -> {
+                        isGenerating = true
+                        wasGeneratingInBackground = true
+                        if (isInBackground) {
+                            startKeepAliveService(getString(R.string.notify_generating))
+                        }
+                    }
+                    "DONE" -> {
+                        isGenerating = false
+                        if (wasGeneratingInBackground) {
+                            completeKeepAliveService(getString(R.string.notify_done))
+                        } else {
+                            stopKeepAliveService()
+                        }
+                        wasGeneratingInBackground = false
+                        clearTaskSnapshot()
+                    }
+                    "ERROR" -> {
+                        isGenerating = false
+                        completeKeepAliveService(getString(R.string.notify_error), getString(R.string.notify_title))
+                        wasGeneratingInBackground = false
+                        clearTaskSnapshot()
+                    }
+                    "CANCELLED" -> {
+                        isGenerating = false
+                        stopKeepAliveService()
+                        wasGeneratingInBackground = false
+                        clearTaskSnapshot()
+                    }
+                }
+            }
+        }
     }
 
     private fun startKeepAliveService(text: String) {
@@ -263,8 +347,8 @@ class MainActivity : AppCompatActivity() {
         startService(ForegroundKeepAliveService.stopIntent(this))
     }
 
-    private fun completeKeepAliveService(text: String) {
-        startService(ForegroundKeepAliveService.completeIntent(this, text))
+    private fun completeKeepAliveService(text: String, title: String? = null) {
+        startService(ForegroundKeepAliveService.completeIntent(this, text, title))
     }
 
     private fun createImageUri(): Uri? {

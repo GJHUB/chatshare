@@ -6,6 +6,7 @@ let currentModel = localStorage.getItem('model') || 'claude-opus-4';
 let currentModelName = localStorage.getItem('modelName') || 'Claude Opus 4';
 let isStreaming = false;
 let abortController = null;
+let currentTaskRequestId = null;
 let conversations = [];
 let currentMessages = []; // track messages with seq for edit/retry
 let pendingFiles = []; // files waiting to be uploaded
@@ -698,6 +699,14 @@ async function syncLatestAssistantSeq(aiWrap) {
   }
 }
 
+function reportTaskStateToNative(state, requestId, offset = 0) {
+  try {
+    if (window.GuDuNative && window.GuDuNative.onTaskState) {
+      window.GuDuNative.onTaskState(state, requestId || '', String(currentConvId || ''), Number(offset || 0));
+    }
+  } catch (_) {}
+}
+
 async function taskGenerateResponse(body, aiWrap) {
   let ok = false;
   isStreaming = true; updateSendBtn();
@@ -705,6 +714,8 @@ async function taskGenerateResponse(body, aiWrap) {
   let fullText = '';
   let bgState = 'FOREGROUND_STREAMING';
   const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  currentTaskRequestId = requestId;
+  reportTaskStateToNative(bgState, requestId, 0);
 
   try {
     const createRes = await fetch('/backend-api/tasks/generate', {
@@ -735,6 +746,7 @@ async function taskGenerateResponse(body, aiWrap) {
 
       if (document.hidden && bgState === 'FOREGROUND_STREAMING') {
         bgState = 'BACKGROUND_STREAMING';
+        reportTaskStateToNative(bgState, taskRequestId, lastOffset);
       }
 
       const statusRes = await fetch(`/backend-api/tasks/${taskRequestId}?offset=${lastOffset}`, {
@@ -748,7 +760,10 @@ async function taskGenerateResponse(body, aiWrap) {
 
       const st = await statusRes.json();
       if (st.status === 'running') {
-        if (document.hidden) bgState = 'BACKGROUND_POLLING';
+        if (document.hidden && bgState !== 'BACKGROUND_POLLING') {
+          bgState = 'BACKGROUND_POLLING';
+          reportTaskStateToNative(bgState, taskRequestId, lastOffset);
+        }
         const delta = st.delta_text || '';
         const text = st.partial_text || '';
         const offset = Number(st.offset || (text.length || fullText.length));
@@ -768,6 +783,7 @@ async function taskGenerateResponse(body, aiWrap) {
         } else {
           setMsgContent(aiWrap, '正在思考...', true);
         }
+        reportTaskStateToNative(bgState, taskRequestId, lastOffset);
         continue;
       }
 
@@ -775,16 +791,19 @@ async function taskGenerateResponse(body, aiWrap) {
         bgState = 'DONE';
         fullText = st.result_text || fullText;
         setMsgContent(aiWrap, fullText || '（已完成，暂无内容）', false);
+        reportTaskStateToNative(bgState, taskRequestId, st.offset || lastOffset);
         ok = true;
         break;
       }
 
       if (st.status === 'cancelled') {
+        reportTaskStateToNative('CANCELLED', taskRequestId, st.offset || lastOffset);
         setMsgContent(aiWrap, '⏹️ 已停止生成', false);
         return;
       }
 
       bgState = 'ERROR';
+      reportTaskStateToNative(bgState, taskRequestId, st.offset || lastOffset);
       setMsgContent(aiWrap, `❌ ${st.error_message || '生成失败'}`, false);
       return;
     }
@@ -792,10 +811,16 @@ async function taskGenerateResponse(body, aiWrap) {
     await syncLatestAssistantSeq(aiWrap);
     return ok;
   } catch (e) {
-    if (e.name !== 'AbortError') setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
-    else if (fullText) setMsgContent(aiWrap, fullText, false);
+    if (e.name !== 'AbortError') {
+      reportTaskStateToNative('ERROR', currentTaskRequestId, fullText.length);
+      setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
+    } else if (fullText) {
+      reportTaskStateToNative('CANCELLED', currentTaskRequestId, fullText.length);
+      setMsgContent(aiWrap, fullText, false);
+    }
   } finally {
     isStreaming = false; updateSendBtn(); abortController = null; scrollToBottom();
+    currentTaskRequestId = null;
   }
   return ok;
 }
@@ -853,6 +878,13 @@ async function streamResponse(url, method, body, aiWrap) {
 }
 
 function stopGeneration() {
+  const rid = currentTaskRequestId;
+  if (rid) {
+    fetch(`/backend-api/tasks/${rid}/cancel`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(() => {});
+  }
   if (abortController) abortController.abort();
 }
 

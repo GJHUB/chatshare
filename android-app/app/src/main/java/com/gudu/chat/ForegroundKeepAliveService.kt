@@ -22,8 +22,9 @@ class ForegroundKeepAliveService : Service() {
         when (intent?.action) {
             ACTION_COMPLETE -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: getString(R.string.notify_done)
+                val title = intent.getStringExtra(EXTRA_TITLE) ?: getString(R.string.notify_done_title)
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFY_DONE_ID, buildCompletionNotification(text))
+                manager.notify(NOTIFY_DONE_ID, buildCompletionNotification(title, text))
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -79,10 +80,10 @@ class ForegroundKeepAliveService : Service() {
             .build()
     }
 
-    private fun buildCompletionNotification(text: String): Notification {
+    private fun buildCompletionNotification(title: String, text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_more)
-            .setContentTitle(getString(R.string.notify_done_title))
+            .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
@@ -95,6 +96,7 @@ class ForegroundKeepAliveService : Service() {
         const val ACTION_STOP = "com.gudu.chat.action.KEEP_ALIVE_STOP"
         const val ACTION_COMPLETE = "com.gudu.chat.action.KEEP_ALIVE_COMPLETE"
         const val EXTRA_TEXT = "extra_text"
+        const val EXTRA_TITLE = "extra_title"
         private const val CHANNEL_ID = "gudu_background_generate"
         private const val NOTIFY_ID = 10001
         private const val NOTIFY_DONE_ID = 10002
@@ -112,10 +114,11 @@ class ForegroundKeepAliveService : Service() {
             }
         }
 
-        fun completeIntent(context: Context, text: String): Intent {
+        fun completeIntent(context: Context, text: String, title: String? = null): Intent {
             return Intent(context, ForegroundKeepAliveService::class.java).apply {
                 action = ACTION_COMPLETE
                 putExtra(EXTRA_TEXT, text)
+                if (!title.isNullOrBlank()) putExtra(EXTRA_TITLE, title)
             }
         }
     }
