@@ -10,6 +10,9 @@ let conversations = [];
 let currentMessages = []; // track messages with seq for edit/retry
 let pendingFiles = []; // files waiting to be uploaded
 const APP_TASK_MODE = /GuDuApp\/1\.0|GuDuApp/.test(navigator.userAgent || '');
+
+const ATTACH_REF_KEY = 'guduAttachmentRefsV1';
+let attachmentRefsByConv = JSON.parse(localStorage.getItem(ATTACH_REF_KEY) || '{}');
 let isAutoFollow = true;
 let hasUnreadDelta = false;
 const nearBottomThreshold = 120;
@@ -328,6 +331,28 @@ function handleFilesSelected(files) {
   renderFilePreview();
 }
 
+function persistAttachmentRefs() {
+  localStorage.setItem(ATTACH_REF_KEY, JSON.stringify(attachmentRefsByConv));
+}
+
+function saveConversationAttachmentRefs(convId, attachments) {
+  if (!convId) return;
+  attachmentRefsByConv[String(convId)] = (attachments || []).map(a => ({
+    id: a.id,
+    mime_type: a.mime_type,
+    name: a.name,
+    size_bytes: Number(a.size_bytes) || 0,
+    width: Number(a.width) || 0,
+    height: Number(a.height) || 0,
+  }));
+  persistAttachmentRefs();
+}
+
+function getConversationAttachmentRefs(convId) {
+  if (!convId) return [];
+  return attachmentRefsByConv[String(convId)] || [];
+}
+
 function renderFilePreview() {
   const container = document.getElementById('file-preview-area');
   container.innerHTML = '';
@@ -589,8 +614,17 @@ async function sendMessage() {
     }));
   }
 
-  if (APP_TASK_MODE) await taskGenerateResponse(body, aiWrap);
-  else await streamResponse(`/api/conversations/${currentConvId}/messages`, 'POST', body, aiWrap);
+  let sendOk = false;
+  if (APP_TASK_MODE) sendOk = await taskGenerateResponse(body, aiWrap);
+  else sendOk = await streamResponse(`/api/conversations/${currentConvId}/messages`, 'POST', body, aiWrap);
+
+  if (attachments.length > 0) {
+    if (sendOk) saveConversationAttachmentRefs(currentConvId, attachments);
+    else if (currentConvId) {
+      const prev = getConversationAttachmentRefs(currentConvId);
+      if (prev.length === 0) saveConversationAttachmentRefs(currentConvId, attachments);
+    }
+  }
 }
 
 
@@ -615,6 +649,7 @@ async function syncLatestAssistantSeq(aiWrap) {
 }
 
 async function taskGenerateResponse(body, aiWrap) {
+  let ok = false;
   isStreaming = true; updateSendBtn();
   abortController = new AbortController();
   let fullText = '';
@@ -668,6 +703,7 @@ async function taskGenerateResponse(body, aiWrap) {
       if (st.status === 'done') {
         fullText = st.result_text || fullText;
         setMsgContent(aiWrap, fullText || '（已完成，暂无内容）', false);
+        ok = true;
         break;
       }
 
@@ -676,15 +712,18 @@ async function taskGenerateResponse(body, aiWrap) {
     }
 
     await syncLatestAssistantSeq(aiWrap);
+    return ok;
   } catch (e) {
     if (e.name !== 'AbortError') setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
     else if (fullText) setMsgContent(aiWrap, fullText, false);
   } finally {
     isStreaming = false; updateSendBtn(); abortController = null; scrollToBottom();
   }
+  return ok;
 }
 
 async function streamResponse(url, method, body, aiWrap) {
+  let ok = false;
   isStreaming = true; updateSendBtn();
   abortController = new AbortController();
   let fullText = '';
@@ -722,14 +761,17 @@ async function streamResponse(url, method, body, aiWrap) {
         } catch(e) {}
       }
     }
-    if (fullText) setMsgContent(aiWrap, fullText, false);
+    if (fullText) { setMsgContent(aiWrap, fullText, false); ok = true; }
     await syncLatestAssistantSeq(aiWrap);
+    return ok;
+    return ok;
   } catch(e) {
     if (e.name !== 'AbortError') setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
     else if (fullText) setMsgContent(aiWrap, fullText, false);
   } finally {
     isStreaming = false; updateSendBtn(); abortController = null; scrollToBottom();
   }
+  return ok;
 }
 
 function stopGeneration() {
@@ -838,6 +880,8 @@ async function doRetry(seq, instruction, model) {
   const body = {};
   if (model) body.model = model;
   if (instruction) body.instruction = instruction;
+  const refAtt = getConversationAttachmentRefs(currentConvId);
+  if (refAtt.length > 0) body.attachments = refAtt;
 
   await streamResponse(`/api/conversations/${currentConvId}/messages/${seq}/retry`, 'POST', body, aiWrap);
 

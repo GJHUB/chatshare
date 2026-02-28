@@ -1109,6 +1109,7 @@ async def edit_message(conv_id: int, msg_seq: int, body: MessageEditBody, reques
 class RetryBody(_BM):
     model: str | None = None
     instruction: str | None = None
+    attachments: list[dict] | None = None
 
 @router.post("/api/conversations/{conv_id}/messages/{msg_seq}/retry")
 async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Request, current_user: dict = Depends(get_current_user)):
@@ -1152,6 +1153,7 @@ async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Re
         use_model = body.model or conv["model"]
         chatshare_conv_id = conv["chatshare_conv_id"]
         last_msg_id = conv["last_message_id"]
+        retry_attachments = body.attachments or None
 
         # If instruction provided, find the user message before this AI msg and modify
         if body.instruction:
@@ -1180,8 +1182,9 @@ async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Re
 
         await conn.execute("UPDATE chat_conversations SET model=$1, updated_at=NOW() WHERE id=$2", use_model, conv_id)
 
-    # If we have chatshare_conv_id, use variant action (native ChatShare retry)
-    if chatshare_conv_id and last_msg_id:
+    # If we have chatshare_conv_id, use variant action (native ChatShare retry).
+    # When retry carries attachments, use normal stream path to preserve file references.
+    if chatshare_conv_id and last_msg_id and not retry_attachments:
         return StreamingResponse(
             _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, last_msg_id, use_model, current_user["id"], current_user["username"]),
             media_type="text/event-stream",
@@ -1197,7 +1200,7 @@ async def retry_message(conv_id: int, msg_seq: int, body: RetryBody, request: Re
     messages = [{"role": r["role"], "content": r["content"]} for r in history]
 
     return StreamingResponse(
-        _do_stream(request, dispatcher, conv_id, messages, use_model, current_user["id"], current_user["username"]),
+        _do_stream(request, dispatcher, conv_id, messages, use_model, current_user["id"], current_user["username"], attachments=retry_attachments),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
