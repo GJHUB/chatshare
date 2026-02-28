@@ -10,6 +10,9 @@ let conversations = [];
 let currentMessages = []; // track messages with seq for edit/retry
 let pendingFiles = []; // files waiting to be uploaded
 const APP_TASK_MODE = /GuDuApp\/1\.0|GuDuApp/.test(navigator.userAgent || '');
+let isAutoFollow = true;
+let hasUnreadDelta = false;
+const nearBottomThreshold = 120;
 
 if (!token) { window.location.href = '/login'; }
 
@@ -276,7 +279,7 @@ async function loadConversation(convId) {
   const el = document.getElementById('messages');
   el.innerHTML = '';
   for (const m of msgs) appendMessage(m.role, m.content, false, m.seq, m.model);
-  scrollToBottom();
+  scrollToBottom(true);
 }
 
 async function newConversation() {
@@ -575,7 +578,7 @@ async function sendMessage() {
   const displayContent = content || '📎 [文件已上传]';
   appendMessage('user', displayContent, false, null, null, attachments);
   const aiWrap = appendMessage('assistant', '', true, null, null);
-  scrollToBottom();
+  scrollToBottom(true);
 
   const body = { content: content || '请分析上传的文件', model: currentModel };
   if (attachments.length > 0) {
@@ -1019,9 +1022,36 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function scrollToBottom() {
+function isNearBottom() {
   const el = document.getElementById('messages');
-  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  if (!el) return true;
+  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= nearBottomThreshold;
+}
+
+function updateUnreadIndicator() {
+  const btn = document.getElementById('scroll-to-bottom-btn');
+  if (!btn) return;
+  btn.classList.toggle('hidden', !(hasUnreadDelta && !isAutoFollow));
+}
+
+function scrollToBottom(force = false) {
+  const el = document.getElementById('messages');
+  if (!el) return;
+  if (!force && !isAutoFollow) {
+    hasUnreadDelta = true;
+    updateUnreadIndicator();
+    return;
+  }
+  requestAnimationFrame(() => {
+    el.scrollTop = el.scrollHeight;
+    isAutoFollow = true;
+    hasUnreadDelta = false;
+    updateUnreadIndicator();
+  });
+}
+
+function jumpToBottom() {
+  scrollToBottom(true);
 }
 
 function updateSendBtn() {
@@ -1093,6 +1123,18 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); newConversation(); }
 });
 document.getElementById('search-input').addEventListener('input', renderConversations);
+
+const messagesEl = document.getElementById('messages');
+messagesEl.addEventListener('scroll', () => {
+  const near = isNearBottom();
+  if (near) {
+    isAutoFollow = true;
+    hasUnreadDelta = false;
+  } else {
+    isAutoFollow = false;
+  }
+  updateUnreadIndicator();
+});
 
 function initMobileSidebarGesture() {
   let startX = 0;
