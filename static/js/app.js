@@ -624,8 +624,9 @@ async function sendMessage() {
       return;
     }
     attachments = attachments.concat(uploaded);
+    pendingFiles = [];
+    renderFilePreview();
   }
-
 
   if (!currentConvId) {
     const res = await api('POST', '/api/conversations', { model: currentModel });
@@ -1070,28 +1071,44 @@ function appendMessage(role, content, streaming, seq, model, attachments = null)
   return wrap;
 }
 
+function codeBlockKey(pre, idx) {
+  const code = pre.querySelector('code');
+  const text = (code?.textContent || '').trim();
+  const head = text.slice(0, 120);
+  return `${idx}:${head}:${text.length}`;
+}
+
 function captureCodeBlockStates(container) {
-  const states = [];
+  const states = new Map();
   container.querySelectorAll('.code-block-wrap.long pre').forEach((pre, idx) => {
-    states.push({
+    const key = codeBlockKey(pre, idx);
+    const atBottom = (pre.scrollHeight - pre.scrollTop - pre.clientHeight) <= 8;
+    states.set(key, {
       idx,
       scrollTop: pre.scrollTop,
       scrollLeft: pre.scrollLeft,
-      height: pre.style.height || ''
+      height: pre.style.height || '',
+      atBottom
     });
   });
   return states;
 }
 
-function restoreCodeBlockStates(container, states) {
-  if (!states || states.length === 0) return;
+function restoreCodeBlockStates(container, states, streaming) {
   const blocks = container.querySelectorAll('.code-block-wrap.long pre');
-  states.forEach(s => {
-    const pre = blocks[s.idx];
-    if (!pre) return;
-    if (s.height) pre.style.height = s.height;
-    pre.scrollTop = s.scrollTop;
-    pre.scrollLeft = s.scrollLeft;
+  blocks.forEach((pre, idx) => {
+    const key = codeBlockKey(pre, idx);
+    const state = states?.get(key);
+    if (state) {
+      if (state.height) pre.style.height = state.height;
+      pre.scrollLeft = state.scrollLeft;
+      if (state.atBottom) pre.scrollTop = pre.scrollHeight;
+      else pre.scrollTop = Math.min(state.scrollTop, Math.max(0, pre.scrollHeight - pre.clientHeight));
+      return;
+    }
+    if (streaming) {
+      pre.scrollTop = pre.scrollHeight;
+    }
   });
 }
 
@@ -1107,7 +1124,7 @@ function setMsgContent(wrap, text, streaming) {
     if (a) a.style.removeProperty('display');
   }
 
-  restoreCodeBlockStates(c, codeStates);
+  restoreCodeBlockStates(c, codeStates, streaming);
   scrollToBottom();
 }
 
