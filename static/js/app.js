@@ -9,6 +9,7 @@ let abortController = null;
 let conversations = [];
 let currentMessages = []; // track messages with seq for edit/retry
 let pendingFiles = []; // files waiting to be uploaded
+const APP_TASK_MODE = /GuDuApp\/1\.0|GuDuApp/.test(navigator.userAgent || '');
 
 if (!token) { window.location.href = '/login'; }
 
@@ -590,7 +591,99 @@ async function sendMessage() {
     body.force_new_chatshare_context = true;
   }
 
-  await streamResponse(`/api/conversations/${currentConvId}/messages`, 'POST', body, aiWrap);
+  if (APP_TASK_MODE) await taskGenerateResponse(body, aiWrap);
+  else await streamResponse(`/api/conversations/${currentConvId}/messages`, 'POST', body, aiWrap);
+}
+
+
+async function syncLatestAssistantSeq(aiWrap) {
+  if (!currentConvId) return;
+  const msgRes = await api('GET', `/api/conversations/${currentConvId}/messages`);
+  if (!msgRes || !msgRes.ok) return;
+  currentMessages = await msgRes.json();
+  if (!aiWrap || currentMessages.length === 0) return;
+  const lastAssistant = [...currentMessages].reverse().find(m => m.role === 'assistant' && !m.replaced);
+  if (!lastAssistant) return;
+  aiWrap.dataset.seq = lastAssistant.seq;
+  const retryMenu = aiWrap.querySelector('.retry-menu');
+  if (retryMenu) {
+    retryMenu.dataset.seq = lastAssistant.seq;
+    const s = lastAssistant.seq;
+    retryMenu.querySelectorAll('.retry-menu-item').forEach(item => {
+      const onclick = item.getAttribute('onclick');
+      if (onclick) item.setAttribute('onclick', onclick.replace(/\d+/g, s));
+    });
+  }
+}
+
+async function taskGenerateResponse(body, aiWrap) {
+  isStreaming = true; updateSendBtn();
+  abortController = new AbortController();
+  let fullText = '';
+  try {
+    const createRes = await fetch('/backend-api/tasks/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        conversation_id: currentConvId,
+        content: body.content,
+        model: body.model,
+        attachments: body.attachments || []
+      }),
+      signal: abortController.signal
+    });
+    if (!createRes.ok) {
+      const err = await createRes.json().catch(() => ({}));
+      setMsgContent(aiWrap, `❌ ${err.detail || '任务创建失败'}`, false);
+      return;
+    }
+
+    const task = await createRes.json();
+    const requestId = task.request_id;
+    let lastOffset = 0;
+
+    while (true) {
+      if (abortController.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      await new Promise(r => setTimeout(r, 1800));
+
+      const statusRes = await fetch(`/backend-api/tasks/${requestId}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: abortController.signal
+      });
+      if (!statusRes.ok) {
+        setMsgContent(aiWrap, '❌ 任务状态查询失败', false);
+        return;
+      }
+
+      const st = await statusRes.json();
+      if (st.status === 'running') {
+        const text = st.partial_text || '';
+        const offset = Number(st.offset || text.length || 0);
+        if (offset >= lastOffset && text.length >= fullText.length) {
+          fullText = text;
+          setMsgContent(aiWrap, fullText || '正在思考...', true);
+          lastOffset = offset;
+        }
+        continue;
+      }
+
+      if (st.status === 'done') {
+        fullText = st.result_text || fullText;
+        setMsgContent(aiWrap, fullText || '（已完成，暂无内容）', false);
+        break;
+      }
+
+      setMsgContent(aiWrap, `❌ ${st.error_message || '生成失败'}`, false);
+      return;
+    }
+
+    await syncLatestAssistantSeq(aiWrap);
+  } catch (e) {
+    if (e.name !== 'AbortError') setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
+    else if (fullText) setMsgContent(aiWrap, fullText, false);
+  } finally {
+    isStreaming = false; updateSendBtn(); abortController = null; scrollToBottom();
+  }
 }
 
 async function streamResponse(url, method, body, aiWrap) {
@@ -632,29 +725,7 @@ async function streamResponse(url, method, body, aiWrap) {
       }
     }
     if (fullText) setMsgContent(aiWrap, fullText, false);
-    // Reload current conversation messages to get updated seq numbers
-    if (currentConvId) {
-      const msgRes = await api('GET', `/api/conversations/${currentConvId}/messages`);
-      if (msgRes && msgRes.ok) {
-        currentMessages = await msgRes.json();
-        // Update aiWrap's data-seq from the latest assistant message
-        if (aiWrap && currentMessages.length > 0) {
-          const lastAssistant = [...currentMessages].reverse().find(m => m.role === 'assistant' && !m.replaced);
-          if (lastAssistant) {
-            aiWrap.dataset.seq = lastAssistant.seq;
-            const retryMenu = aiWrap.querySelector('.retry-menu');
-            if (retryMenu) {
-              retryMenu.dataset.seq = lastAssistant.seq;
-              const s = lastAssistant.seq;
-              retryMenu.querySelectorAll('.retry-menu-item').forEach(item => {
-                const onclick = item.getAttribute('onclick');
-                if (onclick) item.setAttribute('onclick', onclick.replace(/\d+/g, s));
-              });
-            }
-          }
-        }
-      }
-    }
+    await syncLatestAssistantSeq(aiWrap);
   } catch(e) {
     if (e.name !== 'AbortError') setMsgContent(aiWrap, '❌ 连接错误，请重试', false);
     else if (fullText) setMsgContent(aiWrap, fullText, false);
