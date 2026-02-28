@@ -985,7 +985,12 @@ async function copyWithFallback(text) {
     ta.select();
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    return ok;
+    if (ok) return true;
+  } catch (e) {}
+
+  try {
+    window.prompt('复制失败，请手动复制以下代码：', text);
+    return window.confirm('复制完成了吗？');
   } catch (e) {
     return false;
   }
