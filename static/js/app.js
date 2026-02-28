@@ -9,6 +9,7 @@ let abortController = null;
 let conversations = [];
 let currentMessages = []; // track messages with seq for edit/retry
 let pendingFiles = []; // files waiting to be uploaded
+let pendingAttachmentRefs = []; // uploaded refs reusable in this conversation
 const APP_TASK_MODE = /GuDuApp\/1\.0|GuDuApp/.test(navigator.userAgent || '');
 
 const ATTACH_REF_KEY = 'guduAttachmentRefsV1';
@@ -282,12 +283,16 @@ async function loadConversation(convId) {
   const el = document.getElementById('messages');
   el.innerHTML = '';
   for (const m of msgs) appendMessage(m.role, m.content, false, m.seq, m.model);
+  pendingAttachmentRefs = getConversationAttachmentRefs(convId).slice();
+  renderFilePreview();
   scrollToBottom(true);
 }
 
 async function newConversation() {
   currentConvId = null;
   currentMessages = [];
+  pendingAttachmentRefs = [];
+  renderFilePreview();
   document.getElementById('messages').innerHTML = welcomeTemplate();
   bindWelcomePrompts();
   renderConversations();
@@ -356,8 +361,21 @@ function getConversationAttachmentRefs(convId) {
 function renderFilePreview() {
   const container = document.getElementById('file-preview-area');
   container.innerHTML = '';
-  if (pendingFiles.length === 0) { container.classList.add('hidden'); return; }
+  if (pendingFiles.length === 0 && pendingAttachmentRefs.length === 0) { container.classList.add('hidden'); return; }
   container.classList.remove('hidden');
+
+  pendingAttachmentRefs.forEach((a, idx) => {
+    const item = document.createElement('div');
+    item.className = 'file-preview-item';
+    item.id = `file-ref-${idx}`;
+    const mime = String(a.mime_type || '');
+    const isImage = mime.startsWith('image/');
+    const icon = isImage ? '🖼️' : '📄';
+    const size = formatFileSize(Number(a.size_bytes) || 0);
+    item.innerHTML = `<span class="file-info">${icon} ${escapeHtml(a.name || 'file')} (${size}) · 已上传</span><span class="file-remove" onclick="removeFileRef(${idx})">✕</span>`;
+    container.appendChild(item);
+  });
+
   pendingFiles.forEach((file, idx) => {
     const item = document.createElement('div');
     item.className = 'file-preview-item';
@@ -369,11 +387,19 @@ function renderFilePreview() {
     if (isImage) {
       html += `<img class="file-thumbnail" src="${URL.createObjectURL(file)}">`;
     }
-    html += `<span class="file-info">${icon} ${file.name} (${size})</span>`;
+    html += `<span class="file-info">${icon} ${escapeHtml(file.name)} (${size}) · 待上传</span>`;
     html += `<span class="file-remove" onclick="removeFile(${idx})">✕</span>`;
     item.innerHTML = html;
     container.appendChild(item);
   });
+}
+
+function removeFileRef(idx) {
+  pendingAttachmentRefs.splice(idx, 1);
+  if (currentConvId) {
+    saveConversationAttachmentRefs(currentConvId, pendingAttachmentRefs);
+  }
+  renderFilePreview();
 }
 
 function removeFile(idx) {
@@ -571,17 +597,17 @@ async function sendMessage() {
   if (!content && pendingFiles.length === 0) return;
 
   // Upload files first if any
-  let attachments = [];
+  let attachments = pendingAttachmentRefs.slice();
   const hadFiles = pendingFiles.length > 0;
   if (hadFiles) {
-    attachments = await uploadPendingFiles();
-    document.getElementById('file-preview-area').innerHTML = '';
-    document.getElementById('file-preview-area').classList.add('hidden');
-    if (attachments.length === 0) {
+    const uploaded = await uploadPendingFiles();
+    if (uploaded.length === 0 && attachments.length === 0) {
       alert('文件上传未成功，已中断本次发送');
       return;
     }
+    attachments = attachments.concat(uploaded);
   }
+
 
   if (!currentConvId) {
     const res = await api('POST', '/api/conversations', { model: currentModel });
@@ -619,12 +645,17 @@ async function sendMessage() {
   else sendOk = await streamResponse(`/api/conversations/${currentConvId}/messages`, 'POST', body, aiWrap);
 
   if (attachments.length > 0) {
-    if (sendOk) saveConversationAttachmentRefs(currentConvId, attachments);
-    else if (currentConvId) {
+    if (sendOk) {
+      saveConversationAttachmentRefs(currentConvId, attachments);
+      pendingAttachmentRefs = attachments.slice();
+    } else if (currentConvId) {
       const prev = getConversationAttachmentRefs(currentConvId);
       if (prev.length === 0) saveConversationAttachmentRefs(currentConvId, attachments);
+      pendingAttachmentRefs = attachments.slice();
     }
   }
+  pendingFiles = [];
+  renderFilePreview();
 }
 
 
