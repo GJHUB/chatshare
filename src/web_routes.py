@@ -545,6 +545,8 @@ async def _update_minio_meta(user_id, username, conv_id):
 async def _do_variant_stream(request, dispatcher, conv_id, chatshare_conv_id, parent_message_id, model, user_id, username):
     """Use ChatShare's native variant action to retry with a different model."""
     channel, chatshare_model = resolve_model(model)
+    # Unified policy: all models go through sass multimodal channel.
+    channel = "sass"
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     logger.info(f"Variant: conv_id={conv_id}, cs_conv={chatshare_conv_id}, parent_msg={parent_message_id}, model={model}, channel={channel}, cs_model={chatshare_model}")
 
@@ -660,17 +662,9 @@ async def _do_stream(request, dispatcher, conv_id, messages, model, user_id, use
                 continue
             upstream_attachments.append(dict(item))
     channel, chatshare_model = resolve_model(model)
+    # Unified policy: all models go through sass multimodal channel.
+    channel = "sass"
     is_media_gen_model = model in MEDIA_GEN_MODELS or chatshare_model in MEDIA_GEN_MODELS
-
-    # Claude native completion path currently does not carry uploaded file attachments.
-    # When user uploads files with a Claude model, force sass multimodal path.
-    if upstream_attachments and channel == "claude":
-        logger.info("Claude model with attachments detected; switching to sass multimodal path")
-        channel = "sass"
-        if "code" in (model or "").lower() or "编程" in (model or ""):
-            chatshare_model = "Claude-opus-4-6（编程版）"
-        else:
-            chatshare_model = "Claude code（通用版）"
 
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
