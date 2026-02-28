@@ -17,7 +17,8 @@ let attachmentRefsByConv = JSON.parse(localStorage.getItem(ATTACH_REF_KEY) || '{
 let isAutoFollow = true;
 let hasUnreadDelta = false;
 const nearBottomThreshold = 120;
-let miniMapEnabled = localStorage.getItem('miniMapEnabled') === '1';
+const miniMapSaved = localStorage.getItem('miniMapEnabled');
+let miniMapEnabled = miniMapSaved === null ? (window.innerWidth > 768) : (miniMapSaved === '1');
 
 if (!token) { window.location.href = '/login'; }
 
@@ -1272,12 +1273,19 @@ function initMobileSidebarGesture() {
 }
 
 
+function updateMiniMapToggleState() {
+  const btn = document.getElementById('minimap-toggle');
+  if (!btn) return;
+  btn.textContent = miniMapEnabled ? '🗺️ 已开' : '🗺️';
+}
+
 function toggleMiniMap() {
   miniMapEnabled = !miniMapEnabled;
   localStorage.setItem('miniMapEnabled', miniMapEnabled ? '1' : '0');
   const map = document.getElementById('minimap');
   map.classList.toggle('hidden', !miniMapEnabled);
   if (miniMapEnabled) rebuildMiniMap();
+  updateMiniMapToggleState();
 }
 
 function rebuildMiniMap() {
@@ -1314,6 +1322,7 @@ function initMiniMap() {
   if (!map || !track || !messages) return;
 
   map.classList.toggle('hidden', !miniMapEnabled);
+  updateMiniMapToggleState();
 
   const jump = (clientY) => {
     const rect = track.getBoundingClientRect();

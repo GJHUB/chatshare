@@ -200,8 +200,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   --brand:#ff6b35;
   --brand-hover:#e85d2c;
   --brand-light:#fff0e8;
-  --msg-user-bg:#ff6b35;
-  --msg-user-text:#ffffff;
+  --msg-user-bg:#8fd19e;
+  --msg-user-text:#0f172a;
   --msg-ai-border:#ffd4bc;
   --code-inline:#c2590a;
 }
@@ -221,8 +221,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   --brand:#ff6b35;
   --brand-hover:#ff8f5e;
   --brand-light:rgba(255,107,53,.15);
-  --msg-user-bg:#ff6b35;
-  --msg-user-text:#ffffff;
+  --msg-user-bg:#6db784;
+  --msg-user-text:#0b1220;
   --msg-ai-border:rgba(255,107,53,.3);
   --code-inline:#e2b96f;
 }
@@ -310,7 +310,7 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 .msg-actions button:hover{background:var(--bg-hover)!important;color:var(--text-primary)!important}
 .model-item{color:var(--text-primary)!important}
 .hamburger{color:var(--text-primary)!important}
-.msg-user .msg-content{box-shadow:0 2px 8px rgba(255,107,53,.15)}
+.msg-user .msg-content{box-shadow:0 2px 8px rgba(109,183,132,.24)}
 
 /* Mobile sidebar usability */
 @media (max-width: 768px) {
@@ -489,7 +489,7 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 }
 
 /* mini-map navigation */
-.minimap-toggle{margin-left:auto;background:var(--bg-primary);border:1px solid var(--border-default);border-radius:10px;padding:6px 10px;cursor:pointer}
+.minimap-toggle{margin-left:auto;background:var(--bg-primary);border:1px solid var(--border-default);border-radius:10px;padding:6px 10px;cursor:pointer;min-width:72px}
 .minimap-toggle:hover{background:var(--brand-light);border-color:var(--brand)}
 .minimap{position:fixed;right:14px;top:110px;bottom:130px;width:56px;border:1px solid var(--border-default);background:var(--bg-card);border-radius:10px;z-index:140;overflow:hidden}
 .minimap.hidden{display:none}
