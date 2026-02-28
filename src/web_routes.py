@@ -500,7 +500,24 @@ async def list_messages(conv_id: int, limit: int = 50, include_replaced: bool = 
                 "SELECT id,seq,role,content,model,replaced,created_at,attachments FROM chat_messages WHERE conversation_id=$1 AND (replaced IS NULL OR replaced=false) ORDER BY created_at ASC LIMIT $2",
                 conv_id, limit,
             )
-    return [dict(r) for r in rows]
+
+    result = []
+    for r in rows:
+        item = dict(r)
+        raw_attachments = item.get("attachments")
+        if isinstance(raw_attachments, str):
+            try:
+                parsed = json.loads(raw_attachments)
+                item["attachments"] = parsed if isinstance(parsed, list) else []
+            except Exception:
+                item["attachments"] = []
+        elif isinstance(raw_attachments, list):
+            item["attachments"] = raw_attachments
+        else:
+            item["attachments"] = []
+        result.append(item)
+
+    return result
 
 
 async def _get_next_seq(conn, conv_id: int) -> int:
