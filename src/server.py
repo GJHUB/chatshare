@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 import os
+import time
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
@@ -57,6 +58,32 @@ async def verify_admin(request: Request) -> str:
     return key
 
 
+async def log_api_request(request_id: str, api_ctx: dict, endpoint: str, model: str | None, status_code: int, latency_ms: int, error_code: str | None = None):
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO api_requests (id, api_key, user_id, endpoint, model, status_code, latency_ms, error_code)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                ON CONFLICT (id) DO UPDATE
+                SET status_code=EXCLUDED.status_code,
+                    latency_ms=EXCLUDED.latency_ms,
+                    error_code=EXCLUDED.error_code
+                """,
+                request_id,
+                api_ctx.get("api_key"),
+                api_ctx.get("user_id"),
+                endpoint,
+                model,
+                status_code,
+                latency_ms,
+                error_code,
+            )
+    except Exception as e:
+        logger.warning(f"log_api_request failed: {e}")
+
+
 # --- 请求模型 ---
 
 class ChatMessage(BaseModel):
@@ -83,6 +110,11 @@ class NativeConversationRequest(BaseModel):
     message: NativeMessagePayload
     stream: bool = True
     response_mode: str = "blocking"
+
+
+class NativeConversationCreateRequest(BaseModel):
+    title: str | None = None
+    model: str = "gpt-4o"
 
 
 # --- 流式响应 ---
@@ -180,19 +212,24 @@ async def login_page():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatRequest, api_ctx: dict = Depends(verify_api_key)):
+    started = time.time()
+    req_id = f"req_{uuid.uuid4().hex[:12]}"
     api_key = api_ctx["api_key"]
     if not usage_tracker.check_rate_limit(api_key):
+        await log_api_request(req_id, api_ctx, "/v1/chat/completions", request.model, 429, int((time.time() - started) * 1000), "RATE_LIMITED")
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
     channel, chatshare_model = resolve_model(request.model)
 
     if channel not in ("gpt",):
+        await log_api_request(req_id, api_ctx, "/v1/chat/completions", request.model, 503, int((time.time() - started) * 1000), "UNSUPPORTED_MODEL")
         raise HTTPException(status_code=503, detail=f"模型 {request.model} 暂不支持通过 /v1/chat/completions 调用，请使用 Web 界面")
 
     from .dispatcher import NoCarAvailableError
     try:
         car_session = await dispatcher.select_car(channel)
     except NoCarAvailableError as e:
+        await log_api_request(req_id, api_ctx, "/v1/chat/completions", request.model, 503, int((time.time() - started) * 1000), "NO_CAR_AVAILABLE")
         raise HTTPException(status_code=503, detail=str(e))
 
     car_session.is_busy = True
@@ -202,15 +239,52 @@ async def chat_completions(request: ChatRequest, api_ctx: dict = Depends(verify_
     backend_request = openai_to_backend(messages, chatshare_model, stream=True)
 
     if request.stream:
+        await log_api_request(req_id, api_ctx, "/v1/chat/completions", request.model, 200, int((time.time() - started) * 1000), None)
         return StreamingResponse(
             stream_response(car_session, backend_request, request.model),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Request-Id": req_id},
         )
     else:
         backend_request["stream"] = True
         result = await non_stream_response(car_session, backend_request, request.model)
-        return JSONResponse(content=result)
+        await log_api_request(req_id, api_ctx, "/v1/chat/completions", request.model, 200, int((time.time() - started) * 1000), None)
+        return JSONResponse(content={"request_id": req_id, "data": result})
+
+
+@app.post("/v1/conversations")
+async def create_native_conversation(body: NativeConversationCreateRequest, api_ctx: dict = Depends(verify_api_key)):
+    req_id = f"req_{uuid.uuid4().hex[:12]}"
+    user_id = api_ctx.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=403, detail="This API key cannot create conversations")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO chat_conversations (user_id,title,model) VALUES ($1,$2,$3) RETURNING id,title,model,created_at,updated_at",
+            user_id,
+            (body.title or "新对话"),
+            body.model,
+        )
+    return {"request_id": req_id, "data": dict(row)}
+
+
+@app.get("/v1/conversations")
+async def list_native_conversations(limit: int = 20, api_ctx: dict = Depends(verify_api_key)):
+    req_id = f"req_{uuid.uuid4().hex[:12]}"
+    user_id = api_ctx.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=403, detail="This API key cannot list conversations")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id,title,model,updated_at FROM chat_conversations WHERE user_id=$1 ORDER BY updated_at DESC LIMIT $2",
+            user_id,
+            max(1, min(limit, 100)),
+        )
+    return {"request_id": req_id, "data": [dict(r) for r in rows]}
 
 
 @app.post("/v1/conversations/{conversation_id}/messages")
@@ -220,10 +294,12 @@ async def native_conversation_message(
     request: Request,
     api_ctx: dict = Depends(verify_api_key),
 ):
+    started = time.time()
     req_id = body.request_id or request.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex[:12]}"
     user_id = api_ctx.get("user_id")
     username = api_ctx.get("username")
     if not user_id:
+        await log_api_request(req_id, api_ctx, f"/v1/conversations/{conversation_id}/messages", body.model, 403, int((time.time() - started) * 1000), "FORBIDDEN")
         raise HTTPException(status_code=403, detail="This API key cannot access native conversation endpoints")
 
     pool = await get_pool()
@@ -236,6 +312,7 @@ async def native_conversation_message(
             user_id,
         )
         if not conv:
+            await log_api_request(req_id, api_ctx, f"/v1/conversations/{conversation_id}/messages", body.model, 404, int((time.time() - started) * 1000), "NOT_FOUND")
             raise HTTPException(status_code=404, detail="Conversation not found")
 
         chatshare_conv_id = conv["chatshare_conv_id"]
@@ -277,6 +354,7 @@ async def native_conversation_message(
     )
 
     if body.stream:
+        await log_api_request(req_id, api_ctx, f"/v1/conversations/{conversation_id}/messages", body.model, 200, int((time.time() - started) * 1000), None)
         return StreamingResponse(
             gen,
             media_type="text/event-stream",
@@ -285,11 +363,13 @@ async def native_conversation_message(
 
     text, err = await _collect_native_stream_text(gen)
     if err:
+        await log_api_request(req_id, api_ctx, f"/v1/conversations/{conversation_id}/messages", body.model, 502, int((time.time() - started) * 1000), "UPSTREAM_ERROR")
         return JSONResponse(status_code=502, content={
             "request_id": req_id,
             "error": {"code": "UPSTREAM_ERROR", "message": err, "retryable": True},
         })
 
+    await log_api_request(req_id, api_ctx, f"/v1/conversations/{conversation_id}/messages", body.model, 200, int((time.time() - started) * 1000), None)
     return {
         "request_id": req_id,
         "data": {

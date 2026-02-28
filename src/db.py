@@ -53,6 +53,52 @@ async def ensure_schema():
             """
         )
 
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES chat_users(id) ON DELETE CASCADE,
+                name VARCHAR(128) NOT NULL DEFAULT 'default',
+                key_hash VARCHAR(128) NOT NULL UNIQUE,
+                scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+                model_allowlist JSONB NOT NULL DEFAULT '[]'::jsonb,
+                qps_limit INTEGER,
+                rpm_limit INTEGER,
+                tpm_limit INTEGER,
+                status VARCHAR(32) NOT NULL DEFAULT 'active',
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_requests (
+                id VARCHAR(64) PRIMARY KEY,
+                api_key VARCHAR(255),
+                user_id INTEGER,
+                endpoint VARCHAR(255) NOT NULL,
+                model VARCHAR(128),
+                status_code INTEGER,
+                latency_ms INTEGER,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                error_code VARCHAR(64),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_api_requests_created_at ON api_requests(created_at DESC)
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_api_requests_api_key ON api_requests(api_key)
+            """
+        )
+
 
 async def close_pool():
     global _pool
