@@ -487,3 +487,15 @@ html,body{background:var(--bg-primary)!important;color:var(--text-primary)!impor
 @media (max-width:768px){
   .code-block-wrap.long pre{max-height:280px;min-height:180px}
 }
+
+/* mini-map navigation */
+.minimap-toggle{margin-left:auto;background:var(--bg-primary);border:1px solid var(--border-default);border-radius:10px;padding:6px 10px;cursor:pointer}
+.minimap-toggle:hover{background:var(--brand-light);border-color:var(--brand)}
+.minimap{position:fixed;right:14px;top:110px;bottom:130px;width:56px;border:1px solid var(--border-default);background:var(--bg-card);border-radius:10px;z-index:140;overflow:hidden}
+.minimap.hidden{display:none}
+.minimap-track{position:absolute;inset:8px;background:transparent}
+.minimap-item{position:absolute;left:0;right:0;border-radius:2px;opacity:.9}
+.minimap-item.user{background:rgba(255,107,53,.7)}
+.minimap-item.assistant{background:rgba(99,102,241,.55)}
+.minimap-viewport{position:absolute;left:4px;right:4px;border:1px solid var(--brand);background:rgba(255,107,53,.12);border-radius:6px;pointer-events:none}
+@media (max-width:768px){.minimap{display:none!important}.minimap-toggle{display:none!important}}

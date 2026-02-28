@@ -17,6 +17,7 @@ let attachmentRefsByConv = JSON.parse(localStorage.getItem(ATTACH_REF_KEY) || '{
 let isAutoFollow = true;
 let hasUnreadDelta = false;
 const nearBottomThreshold = 120;
+let miniMapEnabled = localStorage.getItem('miniMapEnabled') === '1';
 
 if (!token) { window.location.href = '/login'; }
 
@@ -1053,6 +1054,7 @@ function appendMessage(role, content, streaming, seq, model, attachments = null)
       </div>`;
   }
   el.appendChild(wrap);
+  if (miniMapEnabled) requestAnimationFrame(rebuildMiniMap);
   return wrap;
 }
 
@@ -1152,6 +1154,7 @@ function scrollToBottom(force = false) {
     isAutoFollow = true;
     hasUnreadDelta = false;
     updateUnreadIndicator();
+    if (miniMapEnabled) rebuildMiniMap();
   });
 }
 
@@ -1268,6 +1271,72 @@ function initMobileSidebarGesture() {
   }, { passive: true });
 }
 
+
+function toggleMiniMap() {
+  miniMapEnabled = !miniMapEnabled;
+  localStorage.setItem('miniMapEnabled', miniMapEnabled ? '1' : '0');
+  const map = document.getElementById('minimap');
+  map.classList.toggle('hidden', !miniMapEnabled);
+  if (miniMapEnabled) rebuildMiniMap();
+}
+
+function rebuildMiniMap() {
+  const map = document.getElementById('minimap');
+  const track = document.getElementById('minimap-track');
+  const viewport = document.getElementById('minimap-viewport');
+  const messages = document.getElementById('messages');
+  if (!map || !track || !viewport || !messages) return;
+  if (!miniMapEnabled) return;
+
+  track.innerHTML = '';
+  const total = Math.max(messages.scrollHeight, 1);
+  const h = track.clientHeight || 1;
+  document.querySelectorAll('.msg-wrap').forEach(w => {
+    const top = w.offsetTop;
+    const hh = Math.max(w.offsetHeight, 8);
+    const item = document.createElement('div');
+    item.className = 'minimap-item ' + (w.classList.contains('msg-user') ? 'user' : 'assistant');
+    item.style.top = ((top / total) * h) + 'px';
+    item.style.height = Math.max((hh / total) * h, 2) + 'px';
+    track.appendChild(item);
+  });
+
+  const vpTop = (messages.scrollTop / total) * h;
+  const vpH = Math.max((messages.clientHeight / total) * h, 18);
+  viewport.style.top = vpTop + 'px';
+  viewport.style.height = vpH + 'px';
+}
+
+function initMiniMap() {
+  const map = document.getElementById('minimap');
+  const track = document.getElementById('minimap-track');
+  const messages = document.getElementById('messages');
+  if (!map || !track || !messages) return;
+
+  map.classList.toggle('hidden', !miniMapEnabled);
+
+  const jump = (clientY) => {
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / Math.max(rect.height, 1)));
+    messages.scrollTop = ratio * messages.scrollHeight;
+  };
+
+  track.addEventListener('click', e => jump(e.clientY));
+  let dragging = false;
+  track.addEventListener('mousedown', e => { dragging = true; jump(e.clientY); });
+  document.addEventListener('mousemove', e => { if (dragging) jump(e.clientY); });
+  document.addEventListener('mouseup', () => { dragging = false; });
+
+  messages.addEventListener('scroll', () => {
+    if (miniMapEnabled) rebuildMiniMap();
+  });
+
+  const obs = new MutationObserver(() => { if (miniMapEnabled) rebuildMiniMap(); });
+  obs.observe(messages, { childList: true, subtree: true });
+
+  if (miniMapEnabled) rebuildMiniMap();
+}
+
 function initImageLightbox() {
   const modal = document.createElement('div');
   modal.id = 'image-lightbox';
@@ -1295,3 +1364,4 @@ init();
 bindWelcomePrompts();
 initMobileSidebarGesture();
 initImageLightbox();
+initMiniMap();
