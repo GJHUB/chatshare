@@ -30,6 +30,7 @@ import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.gudu.chat.databinding.ActivityMainBinding
 import java.io.File
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -41,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     private var isInBackground = false
     private var wasGeneratingInBackground = false
     private lateinit var taskPrefs: SharedPreferences
+    private var hasRestoredPageState = false
+    private var pendingPageSnapshotJson: String? = null
 
     private data class TaskSnapshot(
         val requestId: String = "",
@@ -84,12 +87,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         taskPrefs = getSharedPreferences("gudu_task_cache", Context.MODE_PRIVATE)
+        pendingPageSnapshotJson = taskPrefs.getString("page_snapshot", null)
 
         setupWebView()
         setupRetry()
         setupBackPress()
 
-        binding.webView.loadUrl(HOME_URL)
+        val restored = if (savedInstanceState != null) {
+            val wb = savedInstanceState.getBundle("webview_state")
+            if (wb != null) binding.webView.restoreState(wb) != null else false
+        } else false
+
+        if (restored) {
+            hasRestoredPageState = true
+        } else {
+            val url = runCatching {
+                val raw = pendingPageSnapshotJson
+                if (raw.isNullOrBlank()) null else JSONObject(raw).optString("last_url", HOME_URL)
+            }.getOrNull() ?: HOME_URL
+            binding.webView.loadUrl(url)
+        }
     }
 
     override fun onStart() {
@@ -156,6 +173,9 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 injectGenerateObserver()
+                if (!hasRestoredPageState) {
+                    restorePageSnapshotIfNeeded()
+                }
             }
 
             override fun onReceivedError(
@@ -226,6 +246,29 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun requestPageSnapshot() {
+        val js = "(function(){try{return window.__guduGetPageSnapshot?window.__guduGetPageSnapshot():'';}catch(e){return '';} })();"
+        binding.webView.evaluateJavascript(js) { value ->
+            val raw = value ?: ""
+            val cleaned = if (raw.startsWith(""") && raw.endsWith(""")) {
+                JSONObject("{\"v\":$raw}").optString("v", "")
+            } else {
+                raw
+            }
+            if (cleaned.isNotBlank() && cleaned != "null") {
+                taskPrefs.edit().putString("page_snapshot", cleaned).apply()
+            }
+        }
+    }
+
+    private fun restorePageSnapshotIfNeeded() {
+        val raw = pendingPageSnapshotJson ?: return
+        val q = JSONObject.quote(raw)
+        val js = "(function(){if(window.__guduApplyPageSnapshot){window.__guduApplyPageSnapshot($q);} })();"
+        binding.webView.evaluateJavascript(js, null)
+        hasRestoredPageState = true
+    }
+
     private fun readTaskSnapshot(): TaskSnapshot {
         return TaskSnapshot(
             requestId = taskPrefs.getString("request_id", "") ?: "",
@@ -293,6 +336,13 @@ class MainActivity : AppCompatActivity() {
                         stopKeepAliveService()
                     }
                 }
+            }
+        }
+
+        @JavascriptInterface
+        fun onPageSnapshot(snapshotJson: String?) {
+            if (!snapshotJson.isNullOrBlank()) {
+                taskPrefs.edit().putString("page_snapshot", snapshotJson).apply()
             }
         }
 
@@ -401,7 +451,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        requestPageSnapshot()
         CookieManager.getInstance().flush()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        val wb = Bundle()
+        binding.webView.saveState(wb)
+        outState.putBundle("webview_state", wb)
     }
 
     companion object {

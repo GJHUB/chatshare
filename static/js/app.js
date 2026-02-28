@@ -14,6 +14,7 @@ let pendingAttachmentRefs = []; // uploaded refs reusable in this conversation
 const APP_TASK_MODE = /GuDuApp\/1\.0|GuDuApp/.test(navigator.userAgent || '');
 
 const ATTACH_REF_KEY = 'guduAttachmentRefsV1';
+const PAGE_STATE_KEY = 'guduPageSnapshotV1';
 let attachmentRefsByConv = JSON.parse(localStorage.getItem(ATTACH_REF_KEY) || '{}');
 let isAutoFollow = true;
 let hasUnreadDelta = false;
@@ -64,6 +65,10 @@ async function init() {
   document.getElementById('model-name-display').textContent = currentModelName;
   await loadModels();
   await loadConversations();
+  try {
+    const raw = localStorage.getItem(PAGE_STATE_KEY);
+    if (raw) window.__guduApplyPageSnapshot(raw);
+  } catch (_) {}
 }
 
 
@@ -289,7 +294,7 @@ async function startRenameConv(e, convId) {
   startInlineRename(convId, titleSpan);
 }
 
-async function loadConversation(convId) {
+async function loadConversation(convId, options = {}) {
   currentConvId = convId;
   renderConversations();
   const res = await api('GET', `/api/conversations/${convId}/messages`);
@@ -304,7 +309,16 @@ async function loadConversation(convId) {
   }
   pendingAttachmentRefs = getConversationAttachmentRefs(convId).slice();
   renderFilePreview();
-  scrollToBottom(true);
+  if (typeof options.scrollTop === 'number') {
+    const messagesEl = document.getElementById('messages');
+    requestAnimationFrame(() => {
+      messagesEl.scrollTop = Math.max(0, options.scrollTop);
+      if (miniMapEnabled) scheduleMiniMapRebuild();
+    });
+  } else {
+    scrollToBottom(true);
+  }
+  persistPageSnapshot();
 }
 
 async function newConversation() {
@@ -317,6 +331,7 @@ async function newConversation() {
   renderConversations();
   document.getElementById('msg-input').focus();
   closeSidebar();
+  persistPageSnapshot();
 }
 
 async function deleteConv(e, convId) {
@@ -676,6 +691,7 @@ async function sendMessage() {
   }
   pendingFiles = [];
   renderFilePreview();
+  persistPageSnapshot();
 }
 
 
@@ -1193,6 +1209,64 @@ function renderMd(text) {
   try { return marked.parse(text); } catch(e) { return escapeHtml(text); }
 }
 
+function buildPageSnapshot() {
+  const messagesEl = document.getElementById('messages');
+  const input = document.getElementById('msg-input');
+  return {
+    last_url: window.location.href,
+    conversation_id: currentConvId,
+    scroll_top: messagesEl ? Math.round(messagesEl.scrollTop) : 0,
+    scroll_height: messagesEl ? Math.round(messagesEl.scrollHeight) : 0,
+    draft_text: input ? input.value : '',
+    draft_attachments: pendingAttachmentRefs || [],
+    active_model: currentModel,
+    updated_at: Date.now(),
+  };
+}
+
+function persistPageSnapshot() {
+  try {
+    localStorage.setItem(PAGE_STATE_KEY, JSON.stringify(buildPageSnapshot()));
+  } catch (_) {}
+}
+
+window.__guduGetPageSnapshot = function() {
+  try { return JSON.stringify(buildPageSnapshot()); } catch (_) { return ''; }
+};
+
+window.__guduApplyPageSnapshot = async function(raw) {
+  try {
+    const snap = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!snap) return false;
+
+    if (snap.active_model) {
+      const item = document.querySelector(`.model-item[data-id="${snap.active_model}"]`);
+      if (item) selectModel(snap.active_model, item.dataset.name || item.textContent.trim());
+    }
+
+    if (snap.conversation_id) {
+      await loadConversation(Number(snap.conversation_id), { scrollTop: Number(snap.scroll_top || 0) });
+    }
+
+    if (typeof snap.draft_text === 'string') {
+      const input = document.getElementById('msg-input');
+      if (input) {
+        input.value = snap.draft_text;
+        input.dispatchEvent(new Event('input'));
+      }
+    }
+
+    if (Array.isArray(snap.draft_attachments)) {
+      pendingAttachmentRefs = snap.draft_attachments.slice();
+      renderFilePreview();
+    }
+
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 async function copyWithFallback(text) {
   try {
@@ -1320,6 +1394,7 @@ const msgInput = document.getElementById('msg-input');
 msgInput.addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+  persistPageSnapshot();
 });
 msgInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -1352,6 +1427,7 @@ document.getElementById('search-input').addEventListener('input', renderConversa
 
 const messagesEl = document.getElementById('messages');
 messagesEl.addEventListener('scroll', () => {
+  persistPageSnapshot();
   const near = isNearBottom();
   if (near) {
     isAutoFollow = true;
